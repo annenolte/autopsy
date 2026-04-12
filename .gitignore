@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+
+# Autopsy cache
+.autopsy_cache/
+
+# VS Code extension
+extension/node_modules/
+extension/out/
+
+# Environment
+.env
+*.env
+
+# OS
+.DS_Store
