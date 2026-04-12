@@ -146,7 +146,7 @@ def debug_stream(
             br = get_blast_radius(graph, node_id)
             if br:
                 terminal_out, prompt_ctx = format_blast_radius(br)
-                yield f"💀 Blast Radius — {len(br)} nodes can reach {func_name}:\n{terminal_out}\n\n"
+                yield f" Blast Radius — {len(br)} nodes can reach {func_name}:\n{terminal_out}\n\n"
                 blast_context += f"\n## Blast Radius for {func_name}\n{prompt_ctx}"
 
     yield "🧠 Deep analysis with Sonnet...\n\n"
@@ -351,7 +351,7 @@ def scan_stream(
                 if br:
                     func_name = data.get("qualified_name", data.get("name", node))
                     terminal_out, prompt_ctx = format_blast_radius(br)
-                    yield f"💀 Blast Radius — {len(br)} nodes can reach {func_name}:\n{terminal_out}\n\n"
+                    yield f" Blast Radius — {len(br)} nodes can reach {func_name}:\n{terminal_out}\n\n"
                     blast_context += f"\n## Blast Radius for {func_name}\n{prompt_ctx}"
 
     yield "🔬 Scanning with Sonnet...\n\n"

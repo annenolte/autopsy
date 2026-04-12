@@ -146,7 +146,7 @@ def _render_screen(console: Console, selected: int) -> None:
 
     # Title
     title = Text(justify="center")
-    title.append("        💀  ", style="bold red")
+    title.append("          ", style="bold red")
     title.append("A U T O P S Y", style="bold red")
     title.append("   v0.1.0", style="bold red")
     console.print(title)
@@ -310,5 +310,5 @@ def launch_interactive() -> None:
         pass
 
     console.print()
-    console.print("  [bold red]💀 Autopsy out. Stay paranoid.[/bold red]")
+    console.print("  [bold red] Autopsy out. Stay paranoid.[/bold red]")
     console.print()

@@ -22,96 +22,201 @@ Traditional security tools scan files in isolation. They also only watch additio
 
 ## Features
 
-### SCAN THIS — `s` / `Cmd+Shift+S`
+### Three Modes
 
-Reads your git diff, identifies which code was likely written by an AI assistant using 7 heuristic signals, and scans it for vulnerabilities. Before scanning additions, it runs a full deletion analysis pass — catching security controls that were removed and code that was silently activated. Every finding includes:
+**`s` — SCAN THIS** (`Cmd+Shift+S` in VS Code)
+
+Autopsy reads your git diff, identifies which code was likely written by an AI assistant using 7 heuristic signals, and scans it for vulnerabilities. Before scanning additions, it runs a full deletion analysis pass — catching security controls that were removed and code that was silently activated. Every finding includes:
 - Severity badge (CRITICAL / HIGH / MEDIUM / LOW)
 - Exact file and line number
 - Attack scenario in plain English
 - Suggested fix
-- Blast radius — every file that can reach the vulnerable function
+- **Blast radius** — every file that can reach the vulnerable function
 
-### DEBUG THIS — `d` / `Cmd+Shift+D`
+**`d` — DEBUG THIS** (`Cmd+Shift+D` in VS Code)
 
 Describe a bug or paste an error. Autopsy traverses the dependency graph using BFS, identifies which nodes are causally connected to the problem, and streams a full analysis including root cause, causal chain, fix suggestion, and blast radius. The root cause is almost never in the file where the error was thrown.
 
-### ORIENT ME — `o` / `Cmd+Shift+O`
+**`o` — ORIENT ME** (`Cmd+Shift+O` in VS Code)
 
 Point Autopsy at any unfamiliar repo. Get a structured map in seconds: architecture overview, module map, data flow, entry points, and complexity hotspots. Uses graph-theoretic properties — in-degree, out-degree, cycle detection — not just text analysis.
 
-### GRAPH — `g`
+**`g` — GRAPH**
 
-View dependency graph statistics and launch an interactive force-directed visualization showing every node and edge in your codebase. Nodes are color-coded by type (file, function, class), draggable, searchable, and filterable. Available in both the terminal (opens in browser) and as a VS Code webview panel.
+View dependency graph statistics and launch the interactive force-directed visualization (in VS Code) showing every node and edge in your codebase, color-coded by type.
 
-### Inline Diagnostics
+---
 
-After a scan, vulnerable lines get red squiggly underlines directly in the editor. Each diagnostic includes the severity, vulnerability title, and attack scenario. All findings appear in the VS Code Problems panel so you can click through them one by one.
+## How It Works
 
-### Lightbulb Quick Fixes
+### The Dependency Graph
 
-Every vulnerability with a suggested fix gets a lightbulb code action in VS Code. Click the lightbulb (or press `Cmd+.`) on an underlined line to:
-- **Single-line fixes** — apply the fix directly with one click
-- **Multi-line fixes** — open a side-by-side diff preview showing your file before and after the fix, so you can review before applying
-
-### Inline Annotations
-
-Vulnerable lines get inline annotations after the code showing the severity and title at a glance (e.g. `⚠ HIGH: SQL Injection`), visible without hovering or opening any panel.
-
-### Streaming Webview Panel
-
-All analysis results stream character by character into a styled webview panel inside VS Code via Server-Sent Events. The panel renders markdown with syntax-highlighted code blocks, severity badges, and auto-scrolls during streaming. A pulsing "INVESTIGATING" indicator shows when analysis is in progress.
-
-### Auto-Start Server
-
-The VS Code extension automatically starts the Autopsy FastAPI server in a background terminal on activation and polls `/api/health` until it's ready. No manual setup required — open a repo and start scanning.
-
-### Interactive CLI REPL
-
-Type `autopsy` with no arguments to launch the interactive terminal interface with single-keypress navigation using arrow keys:
+Autopsy's core is a **NetworkX directed graph** built by parsing your entire codebase with **Tree-sitter**. Every function, class, and module is a node. Every function call, import, and inheritance relationship is a directed edge.
 
 ```
-    💀  A U T O P S Y   v0.1.0
-    AI Vulnerability Detective
-    ─────────────────────────────────
-    Repo: ~/projects/my-app
-
-  > d  DEBUG THIS      Trace a bug across the dependency graph
-    s  SCAN THIS       Find vulnerabilities in AI-generated code
-    o  ORIENT ME       Map this repo's architecture
-    g  GRAPH           Show dependency graph stats
-    q  Quit
+File A (auth/handler.py)
+  └── calls → get_user() in db.py
+                └── calls → execute_query() in db.py
+                              └── ⚠ SQL Injection here
 ```
 
-Returns to menu after each command. Exit with `q` or Ctrl+C. Falls back to typed input if `readchar` is not installed.
+This graph is what separates Autopsy from a linter. A linter sees one file at a time. Autopsy sees the whole structure.
 
-### Two-Model LLM Pipeline
+### The Full Scan Pipeline
 
-Every analysis runs through two models in sequence:
-1. **Claude Haiku** — fast triage pass that identifies which files and functions are relevant, returns structured JSON
-2. **Claude Sonnet** — deep streaming analysis that reasons across the full subgraph, produces detailed findings
-
-Haiku keeps costs low by filtering irrelevant code before Sonnet sees it. Sonnet only runs on confirmed areas of interest.
-
-### Dependency Graph Engine
-
-Autopsy's core is a NetworkX directed graph built by parsing your entire codebase with Tree-sitter. Every function, class, and module is a node. Every function call, import, and inheritance relationship is a directed edge. This graph is what enables cross-file reasoning — a linter sees one file at a time, Autopsy sees the whole structure.
-
-### Blast Radius Computation
-
-After finding a vulnerability, Autopsy reverses the dependency graph and runs BFS backward from the vulnerable node to find every caller chain that reaches it. This answers the question traditional tools never ask: *"Who can reach this vulnerability?"* Not just "where is it."
+Every scan runs four phases in sequence:
 
 ```
-💀 Blast Radius — 7 files can reach this vulnerability:
-├── auth/handler.py       → calls get_user() directly
-├── api/routes.py         → via auth/handler.py
-├── middleware/session.py → via api/routes.py
-├── api/admin.py          → calls get_user() directly
-└── ... 3 more
+Git Diff
+    │
+    ▼
+┌─────────────────────────┐
+│  Phase 1                │  Scan raw diff for deleted comment openers
+│  Comment Boundary       │  Flag zero-footprint activations
+│  Detection              │  (""", /*, =begin, <!--, etc.)
+└──────────┬──────────────┘
+           │
+           ▼
+┌─────────────────────────┐
+│  Phase 2                │  Build graph at pre-commit SHA
+│  Pre/Post Graph Diff    │  Build graph at post-commit SHA
+│                         │  Diff: activated nodes, deleted nodes,
+│                         │  broken edges, security deletions
+└──────────┬──────────────┘
+           │
+           ▼
+┌─────────────────────────┐
+│  Phase 3                │  Score changed code with 7-signal heuristic
+│  AI Authorship          │  Score ≥ 0.5 = likely_ai, scanned first
+│  Detection              │  Union with activated_nodes from Phase 2
+└──────────┬──────────────┘
+           │
+           ▼
+┌─────────────────────────┐
+│  Phase 4                │  BFS extracts subgraph (max 50 nodes)
+│  LLM Pipeline           │  Claude Haiku triages → JSON
+│                         │  Claude Sonnet streams deep analysis
+│                         │  Blast radius via reverse BFS
+└──────────┬──────────────┘
+           │
+           ▼
+    Terminal / VS Code Panel
+    (streamed via SSE)
+```
+
+### Deletion Analysis
+
+Autopsy detects three categories of deletion-based vulnerabilities that are invisible to diff-only scanners.
+
+**Comment boundary deletion — zero-footprint activation**
+
+Deleting the opening delimiter of a multiline comment activates an entire dormant block of code. The git diff shows only the removed delimiter — one or two characters. The AST sees a completely new set of live functions that never appear as additions, so every diff-only tool misses them entirely.
+
+```
+- """
+  def execute_raw_query(sql):        ← this function is now live
+      db.execute(sql)                ← SQL injection, never reviewed
+  """
+```
+
+Autopsy detects deleted comment openers across all supported languages:
+
+| Delimiter | Language |
+|-----------|----------|
+| `"""` / `'''` | Python |
+| `/*` | JS / TS / Java / Go / C / C++ |
+| `#=` | Julia |
+| `--[[` | Lua |
+| `=begin` | Ruby |
+| `<!--` | HTML / XML |
+
+When a comment boundary deletion is detected, the activated code block is added to scan targets and passed through the full Haiku → Sonnet pipeline as if it were an addition.
+
+```
+⚠  ZERO-FOOTPRINT ACTIVATION DETECTED
+─────────────────────────────────────────────────────────────
+A comment boundary was deleted. Code previously inside this
+comment block is now live and was not caught by diff scanning.
+
+File: auth/handler.py
+Deleted delimiter: """  (Python multiline string / docstring opener)
+
+Autopsy is scanning the newly activated code for vulnerabilities.
+This code does not appear as additions in your git diff.
+```
+
+**Security control deletion**
+
+When a function is removed from the codebase whose name contains security-relevant keywords — `validate`, `authenticate`, `sanitize`, `authorize`, `verify`, `guard`, `protect`, `rate_limit`, `csrf`, `xss`, `escape`, `hash`, `encrypt`, `permission`, `require`, `restrict` — Autopsy flags it and reports every caller that is now unprotected.
+
+```
+🚨  SECURITY CONTROL DELETED
+─────────────────────────────────────────────────────────────
+validate_input() was removed. Its callers may now be unprotected.
+
+Called by: api/routes.py, api/admin.py, middleware/session.py
+```
+
+**Broken edge detection**
+
+When a function that still exists calls a function that no longer exists, Autopsy reports the dangling dependency — code that calls nothing, silently failing at runtime.
+
+```
+⚠  BROKEN DEPENDENCY DETECTED
+─────────────────────────────────────────────────────────────
+auth/handler.py::authenticate()  →  utils/crypto.py::hash_password()
+hash_password() was deleted. authenticate() is now calling nothing.
+```
+
+### Pre/Post Commit Graph Diffing
+
+For deletion analysis, Autopsy builds the dependency graph at two points in time and compares them structurally. File contents are read directly from the git object database using GitPython blob reads into a `TemporaryDirectory` — the working directory is never modified. Node IDs are normalized after snapshot construction so the two graphs are directly comparable.
+
+```python
+pre_graph  = build_graph_at_commit(repo_path, pre_commit_sha)
+post_graph = build_graph_at_commit(repo_path, post_commit_sha)
+graph_diff = diff_graphs(pre_graph, post_graph)
+
+# activated_nodes: in post but not pre — newly live code
+# deleted_nodes: in pre but not post — removed functions
+# broken_edges: caller exists, callee does not
+# security_critical_deletions: deleted security-named functions
+```
+
+Any node in `activated_nodes` — whether activated by comment removal, file restructuring, or any other mechanism — is added to scan targets and goes through the same Haiku → Sonnet → blast radius pipeline as explicit additions.
+
+### The Blast Radius
+
+After finding a vulnerability, Autopsy reverses the dependency graph and runs a second BFS traversal — this time backward from the vulnerable node to find every caller chain that reaches it.
+
+```python
+# Forward graph: A → B → C (A calls B which calls C)
+# Reverse graph: C → B → A (who can reach C?)
+
+reversed_graph = graph.reverse()
+blast_radius = bfs(reversed_graph, vulnerable_node)
+```
+
+This answers the question traditional tools never ask: *"Who can reach this vulnerability?"* Not just "where is it."
+
+```
+⚠ CRITICAL — SQL Injection
+  Location: db.py:42 in get_user()
+  Attack: Unsanitized user input passed directly to execute()
+
+  Blast Radius — 7 files can reach this vulnerability:
+  ├── auth/handler.py       → calls get_user() directly
+  ├── api/routes.py         → via auth/handler.py
+  ├── middleware/session.py → via api/routes.py
+  ├── api/admin.py          → calls get_user() directly
+  └── ... 3 more
+
+  Any of these entry points exposes the SQL injection.
 ```
 
 ### AI Authorship Detection
 
-7 heuristic signals detect which code was likely written by an AI coding assistant, and that code gets scanned first:
+Autopsy uses 7 heuristic signals to detect which code was likely written by an AI coding assistant, and prioritizes scanning that code first:
 
 | Signal | Weight | What it detects |
 |--------|--------|-----------------|
@@ -123,49 +228,7 @@ After finding a vulnerability, Autopsy reverses the dependency graph and runs BF
 | Generated Comments | 0.10 | Docstrings that describe exactly what the code does |
 | Commit Message | 0.15 | "Add feature X" with no context or discussion |
 
-A score >= 0.5 marks the code as `likely_ai`. Autopsy scans `likely_ai` sections first, then the rest of the diff.
-
-### Deletion Analysis
-
-Autopsy detects three categories of deletion-based vulnerabilities that are invisible to diff-only scanners.
-
-**Comment boundary deletion — zero-footprint activation**
-
-Deleting the opening delimiter of a multiline comment activates an entire dormant block of code. The git diff shows only the removed delimiter. The AST sees a completely new set of live functions that never appear as additions, so every diff-only tool misses them entirely.
-
-```
-- """
-  def execute_raw_query(sql):        ← this function is now live
-      db.execute(sql)                ← SQL injection, never reviewed
-  """
-```
-
-Detected across all supported languages:
-
-| Delimiter | Language |
-|-----------|----------|
-| `"""` / `'''` | Python |
-| `/*` | JS / TS / Java / Go / C / C++ |
-| `#=` | Julia |
-| `--[[` | Lua |
-| `=begin` | Ruby |
-| `<!--` | HTML / XML |
-
-**Security control deletion**
-
-When a function is removed whose name contains security-relevant keywords — `validate`, `authenticate`, `sanitize`, `authorize`, `verify`, `guard`, `protect`, `rate_limit`, `csrf`, `xss`, `escape`, `hash`, `encrypt`, `permission`, `require`, `restrict` — Autopsy flags it and reports every caller that is now unprotected.
-
-**Broken edge detection**
-
-When a function that still exists calls a function that no longer exists, Autopsy reports the dangling dependency — code that calls nothing, silently failing at runtime.
-
-### Pre/Post Commit Graph Diffing
-
-For deletion analysis, Autopsy builds the dependency graph at two points in time and compares them structurally. File contents are read directly from the git object database using GitPython blob reads into a temporary directory — the working directory is never modified. Node IDs are normalized after snapshot construction so the two graphs are directly comparable.
-
-### Semantic File Ranking (Optional)
-
-When the `voyageai` package is installed, Autopsy uses Voyage AI's `voyage-code-2` model to compute embeddings for each file in the subgraph and ranks them by cosine similarity to the diff. This narrows the context sent to the LLM to the most semantically relevant files. Embeddings are cached to disk in `.autopsy_cache/` so they only need to be computed once per file version.
+A score ≥ 0.5 marks the code as `likely_ai`. Autopsy scans `likely_ai` sections first, then the rest of the diff.
 
 ### Vulnerability Categories
 
@@ -181,25 +244,6 @@ Autopsy detects 9 vulnerability categories:
 8. **Race Conditions** — timing flaws that corrupt state or bypass checks
 9. **Unvalidated Input** — user data used without sanitization
 
-### FastAPI Server
-
-A local API server on port 7891 provides all Autopsy functionality over HTTP for the VS Code extension and any other client:
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/debug` | POST | Stream causal reasoning for a target |
-| `/api/scan` | POST | Stream vulnerability scan of git diff |
-| `/api/orient` | POST | Stream repository orientation map |
-| `/api/graph` | POST | Return graph stats and subgraph summary |
-| `/api/graph/visual` | POST | Return graph nodes and edges as JSON |
-| `/api/health` | GET | Server health check |
-
-The server caches parsed repos by file fingerprint (SHA-256 of paths + mtimes) so repeated requests to the same unchanged repo are instant.
-
-### Demo Project
-
-The repo includes a `demo_project/` directory with intentionally vulnerable Python code (SQL injection, auth bypass, path traversal) that you can scan to see Autopsy in action without pointing it at your own code.
-
 ---
 
 ## Architecture
@@ -207,52 +251,69 @@ The repo includes a `demo_project/` directory with intentionally vulnerable Pyth
 ```
 autopsy/
 ├── cli/
-│   ├── main.py              # Typer CLI commands (scan, debug, orient, graph, serve)
-│   ├── interactive.py        # Arrow-key REPL with readchar
-│   └── splash.py             # Header renderer
-├── parser/
-│   ├── core.py               # Tree-sitter file and directory parsing
-│   ├── extractors.py         # Language-specific AST extractors (Python, JS, TS)
-│   ├── languages.py          # Tree-sitter language initialization
-│   └── models.py             # ParsedFile, FunctionDef, ClassDef, ImportDef, CallSite
+│   └── main.py                    # Typer CLI + interactive REPL (readchar)
 ├── graph/
-│   ├── builder.py            # NetworkX graph construction, build_graph_at_commit,
-│   │                         # diff_graphs, path normalization
-│   ├── subgraph.py           # BFS subgraph extraction, file content loading
-│   ├── traversal.py          # Blast radius via reverse BFS
-│   └── visualize.py          # Standalone HTML force-directed graph visualization
+│   └── builder.py                 # NetworkX graph construction,
+│                                  # build_graph_at_commit,
+│                                  # diff_graphs, _normalize_graph_paths
+├── parser/
+│   └── core.py                    # Tree-sitter repo parsing → AST
 ├── detection/
-│   ├── deletions.py          # Comment boundary detection, zero-footprint activation,
-│   │                         # security deletion + broken edge formatters
-│   └── heuristics.py         # 7-signal AI authorship detector
+│   ├── deletions.py               # Comment boundary detection,
+│   │                              # zero-footprint activation,
+│   │                              # deletion output formatters
+│   ├── heuristics.py              # 7-signal AI authorship detector
+│   └── vulnerabilities.py        # 9 vulnerability category definitions
+├── traversal/
+│   └── core.py                    # BFS subgraph extraction + blast radius
 ├── llm/
-│   ├── client.py             # Anthropic API client (Haiku non-streaming, Sonnet streaming)
-│   ├── pipeline.py           # Full scan/debug/orient pipelines (Phases 1–4)
-│   └── prompts.py            # System prompts for triage, debug, scan, orient
-├── cache/
-│   └── embeddings.py         # Voyage AI embedding cache (disk-backed JSON)
+│   ├── pipeline.py                # Full scan pipeline (Phases 1–4)
+│   ├── triage.py                  # Claude Haiku fast pass (JSON output)
+│   └── analysis.py                # Claude Sonnet deep pass (streaming)
 ├── server/
-│   └── app.py                # FastAPI server with SSE streaming and repo caching
-└── utils/
-extension/
-├── src/
-│   ├── extension.ts          # VS Code extension entry point, code action provider
-│   ├── panel.ts              # Streaming markdown webview panel
-│   ├── diagnostics.ts        # Inline diagnostics, fix store, gutter annotations
-│   ├── graphPanel.ts         # Force-directed graph webview for VS Code
-│   └── client.ts             # HTTP/SSE client for the FastAPI backend
-├── media/
-│   └── mascot.svg            # Autopsy logo
-└── package.json              # Extension manifest, commands, keybindings, settings
-tests/
-├── test_parser.py            # Tree-sitter parsing tests
-├── test_graph.py             # Dependency graph construction tests
-├── test_heuristics.py        # AI authorship detection tests
-├── test_deletions.py         # Deletion analysis tests
-├── test_api.py               # FastAPI endpoint tests
-└── conftest.py               # Shared test fixtures
-demo_project/                  # Intentionally vulnerable code for demo scans
+│   └── main.py                    # FastAPI server (port 7891)
+│       ├── POST /api/debug
+│       ├── POST /api/scan
+│       ├── POST /api/orient
+│       ├── POST /api/graph
+│       ├── POST /api/graph/visual
+│       └── GET  /api/health
+└── vscode/
+    ├── extension.ts               # VS Code extension entry point
+    ├── panel.ts                   # Streaming webview panel
+    ├── diagnostics.ts             # Inline red squiggly underlines
+    └── graph.ts                   # Force-directed dependency graph
 ```
+
+### The VS Code Extension
+
+The extension communicates with Autopsy's FastAPI server over localhost:7891. It auto-starts the server on activation and polls `/api/health` until ready.
+
+- **Streaming webview panel** — results stream character by character via Server-Sent Events
+- **Inline diagnostics** — vulnerable lines get red squiggly underlines in the editor
+- **Interactive graph** — force-directed visualization with draggable nodes, color-coded by type
+- **Problems panel** — all findings surfaced as VS Code diagnostics
+
+### The CLI REPL
+
+Type `autopsy` with no arguments to launch the interactive interface:
+
+```
+    A U T O P S Y   v0.1.0
+    AI Vulnerability Detective
+    ─────────────────────────────────
+    Repo: ~/projects/my-app
+
+  > d  DEBUG THIS      Trace a bug across the dependency graph
+    s  SCAN THIS       Find vulnerabilities in AI-generated code
+    o  ORIENT ME       Map this repo's architecture
+    g  GRAPH           Show dependency graph stats
+    q  Quit
+```
+
+Single-keypress navigation. Returns to menu after each command. Exit with `q` or Ctrl+C.
+
+`autopsy serve` starts the FastAPI server for VS Code extension communication.
 
 ---
 
@@ -260,22 +321,26 @@ demo_project/                  # Intentionally vulnerable code for demo scans
 
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
-| Code Parsing | Tree-sitter >= 0.23 | AST generation for Python, JS, TS, TSX |
-| Graph Engine | NetworkX >= 3.2 | Dependency graph construction, traversal, diffing |
-| Git Integration | GitPython >= 3.1.40 | Diffs, commit history, blob reads for graph snapshots |
+| Code Parsing | Tree-sitter ≥ 0.23 | AST generation for Python, JS, TS, TSX |
+| Graph Engine | NetworkX ≥ 3.2 | Dependency graph construction, traversal, diffing |
+| Git Integration | GitPython ≥ 3.1.40 | Diffs, commit history, blob reads for graph snapshots |
 | LLM Triage | Claude Haiku 4.5 | Fast JSON triage pass (2048 tokens) |
 | LLM Analysis | Claude Sonnet 4.5 | Deep streaming analysis (4096 tokens) |
-| Code Embeddings | Voyage AI voyage-code-2 | Semantic similarity for subgraph selection (optional) |
-| API Server | FastAPI >= 0.109 + Uvicorn | Local server for VS Code extension |
+| Code Embeddings | Voyage AI voyage-code-2 | Semantic similarity for subgraph selection |
+| API Server | FastAPI ≥ 0.109 + Uvicorn | Local server for VS Code extension |
 | CLI | Typer + Rich + readchar | Interactive terminal REPL |
-| VS Code Extension | TypeScript + VS Code API | Editor integration, diagnostics, code actions |
-| Streaming | Server-Sent Events (SSE) | Real-time output to VS Code panel and CLI |
+| VS Code Extension | TypeScript + VS Code API | Editor integration |
+| Streaming | Server-Sent Events (SSE) | Real-time output to VS Code panel |
 
 ---
 
 ## Installation
 
-From source:
+```bash
+pip install autopsy
+```
+
+Or from source:
 
 ```bash
 git clone https://github.com/annenolte/autopsy
@@ -283,24 +348,13 @@ cd autopsy
 pip install -e .
 ```
 
-Set your Anthropic API key (pick one method):
+Set your Anthropic API key:
 
 ```bash
-# Option 1: Environment variable
 export ANTHROPIC_API_KEY=your_key_here
-
-# Option 2: .env file in the repo root
-cp .env.example .env
-# Then edit .env and paste your key
 ```
 
-For the VS Code extension, `cd extension && npm install && npm run compile`, then open the `extension/` folder in VS Code and press F5 to launch the Extension Development Host.
-
-Optional — for semantic file ranking:
-```bash
-pip install "autopsy[embeddings]"
-export VOYAGE_API_KEY=your_voyage_key_here
-```
+Install the VS Code extension from the marketplace (search "Autopsy") or install the `.vsix` file directly.
 
 ---
 
@@ -315,20 +369,11 @@ autopsy
 # Run a scan directly
 autopsy scan /path/to/repo
 
-# Scan uncommitted changes
-autopsy scan /path/to/repo --uncommitted
-
 # Debug a specific error
-autopsy debug /path/to/repo --target app.py --query "TypeError: cannot read property of undefined"
+autopsy debug /path/to/repo --error "TypeError: cannot read property of undefined"
 
 # Map a repo's architecture
 autopsy orient /path/to/repo
-
-# Show dependency graph stats
-autopsy graph /path/to/repo
-
-# Open interactive graph in browser
-autopsy graph /path/to/repo --view
 
 # Start the VS Code server
 autopsy serve
@@ -338,16 +383,11 @@ autopsy serve
 
 With the extension installed and a repo open:
 
-- `Cmd+Shift+D` — Debug This (prompts for error description, streams causal analysis)
-- `Cmd+Shift+S` — Scan This (choose uncommitted or last commit, streams vulnerability scan)
-- `Cmd+Shift+O` — Orient Me (streams structured repo map)
-- `Autopsy: Show Dependency Graph` — opens interactive force-directed graph in a webview panel
+- `Cmd+Shift+D` — Debug This
+- `Cmd+Shift+S` — Scan This
+- `Cmd+Shift+O` — Orient Me
 
-After a scan:
-- Red squiggly underlines appear on vulnerable lines
-- Inline annotations show severity and title after each flagged line
-- Click the lightbulb on any flagged line to preview or apply the suggested fix
-- Check the Problems panel for a full list of findings
+Results stream into the Autopsy panel. Vulnerable lines get red squiggly underlines directly in your editor.
 
 ---
 
@@ -370,17 +410,16 @@ Cost controls: Haiku handles triage, Sonnet only runs on confirmed findings, sub
 
 | | Copilot / Cursor | Sentry | Semgrep | **Autopsy** |
 |---|---|---|---|---|
-| Finds vulnerabilities proactively | - | - | Yes | Yes |
-| Knows which files to look at | - | - | - | Yes |
-| Traces cross-file root causes | - | Yes (post-prod) | - | Yes |
-| Detects AI-generated code | - | - | - | Yes |
-| Maps blast radius | - | - | - | Yes |
-| Catches deletion-activated code | - | - | - | Yes |
-| Detects security control deletion | - | - | - | Yes |
-| Detects broken dependencies | - | Yes (runtime) | - | Yes |
-| In-editor fix suggestions | - | - | - | Yes |
-| Works before you ship | Yes | - | Yes | Yes |
-| No pasting required | - | Yes | Yes | Yes |
+| Finds vulnerabilities proactively | ✗ | ✗ | ✓ | ✓ |
+| Knows which files to look at | ✗ | ✗ | ✗ | ✓ |
+| Traces cross-file root causes | ✗ | ✓ (post-prod) | ✗ | ✓ |
+| Detects AI-generated code | ✗ | ✗ | ✗ | ✓ |
+| Maps blast radius | ✗ | ✗ | ✗ | ✓ |
+| Catches deletion-activated code | ✗ | ✗ | ✗ | ✓ |
+| Detects security control deletion | ✗ | ✗ | ✗ | ✓ |
+| Detects broken dependencies | ✗ | ✓ (runtime) | ✗ | ✓ |
+| Works before you ship | ✓ | ✗ | ✓ | ✓ |
+| No pasting required | ✗ | ✓ | ✓ | ✓ |
 
 Sentry catches your house on fire. Autopsy finds the gas leak before anyone lights a match.
 
@@ -388,7 +427,7 @@ Sentry catches your house on fire. Autopsy finds the gas leak before anyone ligh
 
 ## Built With
 
-Built solo in 24 hours at **Los Altos Hacks X** — April 11-12, 2026.
+Built solo in 24 hours at **Los Altos Hacks X** — April 11–12, 2026.
 
 By **Anne Nolte** — [GitHub](https://github.com/annenolte)
 
