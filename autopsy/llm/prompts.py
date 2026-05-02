@@ -74,7 +74,18 @@ For each vulnerability found, provide:
 
 ---
 
-Focus on real, exploitable vulnerabilities. Do not flag style issues or theoretical concerns. If the code is secure, say so."""
+Focus on real, exploitable vulnerabilities. Do not flag style issues or theoretical concerns. If the code is secure, say so.
+
+## SQL Injection — explicit definition
+A function is a SQL injection sink (and must be reported as a standalone CRITICAL finding) whenever it accepts a raw SQL string parameter and passes it directly to a database execute call (e.g. `cursor.execute(sql)`, `conn.execute(sql)`, `db.exec(sql)`, `session.execute(text(sql))`) without binding parameters or otherwise validating that the string is not attacker-controlled. This applies to thin wrapper functions like `execute_query(sql)` and `execute_read(sql)` even when no caller is shown — the wrapper itself is the foundational sink for all upstream injection chains, so it must be flagged on its own, not only mentioned in the blast radius of other findings.
+
+When multiple distinct functions in the same file each contain independent vulnerabilities, report each function as a separate finding with its own ## [SEVERITY:] header and its own Location line pointing to that specific function. Do not group multiple vulnerable functions into a single finding. Each exploitable function is a separate attack surface and must be reported independently. This applies to ALL vulnerability categories — SQLi, Auth Bypass, Secrets Exposure (e.g. weak password hashing with MD5/SHA1), Path Traversal, etc. Do not let a focus on injection findings cause you to skip standalone authN/authZ or weak-cryptography findings in the same file.
+
+Pay special attention to cross-file vulnerabilities where a function in one file calls a security-critical function in another file and ignores the return value, or forwards unsanitized input to a downstream sink. These are the hardest vulnerabilities to catch and the most important to report. For each function in the subgraph that calls another function with a security-relevant name (validate, authenticate, sanitize, check_permission, execute_query, execute_read), verify that the return value is used and that any input passed is sanitized before being forwarded.
+
+When a function in file A passes a parameter directly to a function in file B that is a known injection sink (execute_query, execute_read, or any function flagged as a SQLi vulnerability), report a separate finding in file A at the line where the unsanitized parameter is forwarded. The location should point to the forwarding call in file A, not the sink in file B. Use the appropriate category (SQLi when the sink is a SQL execute call) and the severity that matches the impact.
+
+Treat any token-validating function or auth decorator (e.g. `require_auth`, `@login_required`, `verify_token`, `check_session`) as a HIGH-severity Auth Bypass finding if it does not check token expiry, token scope/audience, or revocation status. The mere presence of an auth check is not enough — accepting any non-empty or structurally valid token without verifying it is still live, in-scope, and not revoked is a bypass. Report this as a standalone finding at the location of the deficient check, even when no specific caller exploitation is shown."""
 
 ORIENT_SYSTEM = """You are Autopsy's codebase navigator. You generate structured maps of repositories to help developers understand unfamiliar codebases quickly.
 

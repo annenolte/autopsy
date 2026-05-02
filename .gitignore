@@ -19,3 +19,6 @@ extension/out/
 
 # OS
 .DS_Store
+
+# Eval harness output
+results*.json
