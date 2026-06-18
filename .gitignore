@@ -22,3 +22,4 @@ extension/out/
 
 # Eval harness output
 results*.json
+benchmark/results/

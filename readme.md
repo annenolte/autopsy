@@ -406,6 +406,87 @@ Cost controls: Haiku handles triage, Sonnet only runs on confirmed findings, sub
 
 ---
 
+## Reproduce the evaluation
+
+The evaluation in the paper is frozen under `benchmark/`. It measures how well
+Autopsy's scan recovers a known set of planted vulnerabilities.
+
+**Environment**
+
+- Python ≥ 3.10
+- An Anthropic API key (the scan makes live calls to Haiku + Sonnet)
+
+```bash
+# 1. Install Autopsy and its dependencies (editable install)
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+
+# 2. Provide your API key (never commit it — .env is gitignored)
+cp .env.example .env        # then edit .env and set ANTHROPIC_API_KEY=sk-...
+#   or: export ANTHROPIC_API_KEY=sk-...
+```
+
+**Run the benchmark**
+
+```bash
+# Single live run (default fuzz tolerance = ±5 lines)
+python benchmark/eval.py
+
+# Report mean ± standard deviation across repeated runs
+python benchmark/eval.py --repeat 5
+
+# Reproduce the looser legacy matching used during development
+python benchmark/eval.py --fuzz-lines 25
+
+# Offline wiring check — builds the graph + diff and self-tests the
+# matcher without any API call (also the automatic fallback when no key is set)
+python benchmark/eval.py --dry-run
+```
+
+**Expected output shape.** The harness prints the dependency-graph and diff
+sizes, streams the scan, then prints a results table — True/False
+Positives, False Negatives, and Precision / Recall / F1 as whole-number
+percentages — followed by the lists of which ground-truth IDs were true
+positives, which were missed, and which findings were false positives. A JSON
+record of every run (raw scan output included) is written to
+`benchmark/results/eval_<timestamp>.json` (this directory is gitignored).
+
+> **Results vary slightly across runs.** The scan calls Claude with the model's
+> default sampling (the current client exposes no temperature control), so the
+> exact finding set — and therefore precision/recall — shifts a little run to
+> run. Use `--repeat N` to characterize the spread rather than reading a single
+> run as definitive.
+
+### Benchmark
+
+Everything the evaluation needs lives in `benchmark/`:
+
+- **`demo_project/`** (repo root) — the *vulnerable* target: a small Flask-style
+  user-management module (search, profile update, export, admin tools) carrying
+  twelve deliberately planted vulnerabilities (SQL injection, auth bypass, and
+  MD5 password hashing) spread across six files.
+- **`benchmark/baseline/`** — a **reconstructed** clean version of the same
+  module: identical structure and function signatures with the vulnerabilities
+  removed (bound parameters, token expiry/scope checks, PBKDF2 hashing, enforced
+  permission checks). It is **not** recovered original source — no
+  pre-vulnerability version was ever committed — so each file is labeled as a
+  reconstruction in its header. The baseline is the "before" state; the
+  vulnerable demo is the "after" state.
+- **`benchmark/make_diff.py`** — builds a throwaway git repo with two commits
+  (baseline → vulnerable) and emits the unified diff, exactly mirroring how
+  `autopsy scan` diffs two refs and feeds the diff (plus the repo's git object
+  database) into the scan pipeline.
+- **`benchmark/ground_truth.json`** — the authoritative list of planted
+  vulnerabilities (`id`, `file`, `category`, `line_start`, `line_end`,
+  `description`), with line numbers read directly from `demo_project`. A finding
+  counts as a true positive when its file basename matches, its (normalized)
+  category matches, and its reported line is within `--fuzz-lines` of the labeled
+  range; matching is one-to-one. One entry (`sqli-search-service`) is marked
+  `"provisional": true` and is **excluded from scoring** unless you pass
+  `--include-provisional` — see its `provisional_reason` field.
+
+---
+
 ## Why Autopsy vs. Existing Tools
 
 | | Copilot / Cursor | Sentry | Semgrep | **Autopsy** |
