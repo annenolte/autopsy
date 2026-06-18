@@ -9,7 +9,11 @@
     "Entries with \"provisional\": true are NOT counted toward the scored ground truth",
     "unless eval.py is run with --include-provisional. See README 'Benchmark' subsection.",
     "Category strings are the authoritative human labels; eval.py normalizes them",
-    "(e.g. 'Weak Crypto' <-> the tool's 'Secrets Exposure') before comparing."
+    "(e.g. 'Weak Crypto' <-> the tool's 'Secrets Exposure') before comparing.",
+    "An entry may set \"accepted_categories\" (defaults to [category]) to list more",
+    "than one valid category when the planted vulnerability genuinely spans them",
+    "(e.g. an unauthenticated arbitrary-SQL endpoint is both SQLi and Auth Bypass).",
+    "This only relaxes the category check; the file and +/- line gates are unchanged."
   ],
   "vulnerabilities": [
     {
@@ -72,9 +76,10 @@
       "id": "sqli-admin-run",
       "file": "admin_api.py",
       "category": "SQLi",
+      "accepted_categories": ["SQLi", "Auth Bypass"],
       "line_start": 9,
       "line_end": 17,
-      "description": "/api/admin/run-query (run_raw_query): executes arbitrary client-supplied SQL with no auth check."
+      "description": "/api/admin/run-query (run_raw_query): executes arbitrary client-supplied SQL with no auth check. This endpoint is genuinely both SQLi (raw client SQL reaches execute_read) and an Auth Bypass (no auth on a privileged route); the scanner correctly characterizes it either way, so both categories are accepted for this single planted vulnerability."
     },
     {
       "id": "sqli-admin-delete",

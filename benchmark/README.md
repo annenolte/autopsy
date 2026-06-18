@@ -23,10 +23,18 @@ The scan target itself is `demo_project/` at the repository root (the
 A streamed finding matches a ground-truth entry when **all** hold:
 
 1. file basename matches,
-2. normalized category matches (e.g. ground-truth `Weak Crypto` ↔ the scanner's
-   `Secrets Exposure` wording — see `normalize_category` in `eval.py`),
+2. category matches — the finding's category overlaps the entry's
+   `accepted_categories` after normalization (e.g. ground-truth `Weak Crypto` ↔
+   the scanner's `Secrets Exposure` wording — see `category_tokens` /
+   `categories_match` in `eval.py`),
 3. the reported line is within `--fuzz-lines` (default **5**) of
    `[line_start, line_end]`.
+
+Most entries accept a single category. `sqli-admin-run` accepts **both** `SQLi`
+and `Auth Bypass`: `/api/admin/run-query` executes arbitrary client SQL on an
+unauthenticated privileged route, so it is genuinely both, and the scanner is
+correct whichever label it emits. `accepted_categories` only relaxes the
+category check — the file and line gates are unchanged.
 
 Matching is one-to-one (a finding can satisfy at most one entry and vice versa);
 ties break by smallest line distance. `--fuzz-lines 25` reproduces the looser

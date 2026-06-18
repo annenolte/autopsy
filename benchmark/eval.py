@@ -98,6 +98,14 @@ def load_ground_truth(
             "category": e["category"],
             "line_start": int(e["line_start"]),
             "line_end": int(e["line_end"]),
+            # accepted_categories: the category label(s) a finding may carry and
+            # still match this entry. Defaults to [category]; an entry may list
+            # more than one when the planted vulnerability genuinely spans
+            # categories (e.g. an unauthenticated arbitrary-SQL endpoint is both
+            # SQLi and Auth Bypass). It never widens the line/file gate.
+            "accepted_categories": list(
+                e.get("accepted_categories", [e["category"]])
+            ),
             "provisional": bool(e.get("provisional", False)),
             "description": e.get("description", ""),
         })
@@ -125,13 +133,21 @@ _CATEGORY_RULES = [
 ]
 
 
-def normalize_category(raw: str) -> str:
-    """Map a free-text category string to a canonical token (or '' if unknown)."""
+def category_tokens(raw: str) -> set[str]:
+    """All canonical tokens a free-text category string maps to.
+
+    Returns a set (not a single token) so a dual-labeled finding like
+    "SQLi / Auth Bypass" matches an SQLi *or* an Auth Bypass entry.
+    """
     s = (raw or "").lower()
-    for token, needles in _CATEGORY_RULES:
-        if any(n in s for n in needles):
-            return token
-    return ""
+    return {token for token, needles in _CATEGORY_RULES if any(n in s for n in needles)}
+
+
+def categories_match(finding_category: str, accepted: list[str]) -> bool:
+    """True if the finding's category overlaps any accepted ground-truth category."""
+    f = category_tokens(finding_category)
+    a = set().union(*(category_tokens(c) for c in accepted)) if accepted else set()
+    return bool(f & a)
 
 
 # ─── Finding parser ─────────────────────────────────────────────────────────
@@ -231,7 +247,7 @@ def match(
     candidates = []  # (distance, finding_idx, truth_order, truth_id)
     for fi, finding in enumerate(findings):
         for ti, truth in enumerate(all_truth):
-            if normalize_category(finding["category"]) != normalize_category(truth["category"]):
+            if not categories_match(finding["category"], truth["accepted_categories"]):
                 continue
             d = finding_truth_distance(finding, truth, fuzz)
             if d is not None:
@@ -271,7 +287,7 @@ def match(
         f = findings[fi]
         for t in all_truth:
             if finding_truth_distance(f, t, fuzz) is not None and \
-               normalize_category(f["category"]) != normalize_category(t["category"]):
+               not categories_match(f["category"], t["accepted_categories"]):
                 category_mismatches.append({
                     "finding_index": fi,
                     "finding_title": f["title"],
