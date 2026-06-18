@@ -456,6 +456,15 @@ record of every run (raw scan output included) is written to
 > exact finding set — and therefore precision/recall — shifts a little run to
 > run. Use `--repeat N` to characterize the spread rather than reading a single
 > run as definitive.
+>
+> **Model note.** The analysis model originally used in the paper,
+> `claude-sonnet-4-20250514`, has been retired by Anthropic (live calls now
+> return a 404). The client is pinned to its date-stamped successor,
+> `claude-sonnet-4-5-20250929`, so the benchmark runs reproducibly; absolute
+> numbers will differ from the original model. The triage model
+> (`claude-haiku-4-5-20251001`) is unchanged. Also ensure Autopsy is installed
+> editable **from this repository** (`pip install -e .`) so the benchmark
+> exercises this code rather than another local checkout.
 
 ### Benchmark
 

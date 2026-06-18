@@ -55,6 +55,17 @@ tolerance used during development.
 The scan uses Claude's default sampling — the current client
 (`autopsy/llm/client.py`) exposes no temperature parameter, and the harness does
 not change the tool's detection path to add one. Results therefore vary slightly
-between runs; use `--repeat N` to report mean ± standard deviation. Model IDs are
-those defined in the client (`claude-haiku-4-5-20251001`,
-`claude-sonnet-4-20250514`).
+between runs; use `--repeat N` to report mean ± standard deviation.
+
+**Model substitution (2026-06-18).** The analysis model used when the paper was
+written, `claude-sonnet-4-20250514`, has been retired by Anthropic and now
+returns a 404, which broke the live benchmark. The client is pinned to its
+date-stamped successor, `claude-sonnet-4-5-20250929` (see the note in
+`autopsy/llm/client.py`); the triage model `claude-haiku-4-5-20251001` is
+unchanged and still available. Absolute precision/recall therefore differ from
+the original model — confirm whether you want this successor pinned for the
+camera-ready, or a different available model.
+
+> Install Autopsy editable from this repo (`pip install -e .`) before running the
+> benchmark, so `import autopsy` resolves to this code and not another local
+> checkout.

@@ -16,7 +16,10 @@ load_dotenv(_env_path)
 
 # Model configuration
 HAIKU_MODEL = "claude-haiku-4-5-20251001"
-SONNET_MODEL = "claude-sonnet-4-20250514"
+# NOTE: the original analysis model, "claude-sonnet-4-20250514", was retired by
+# Anthropic and now returns a 404 not_found_error, which broke the benchmark.
+# Pinned to its date-stamped successor for reproducibility (updated 2026-06-18).
+SONNET_MODEL = "claude-sonnet-4-5-20250929"
 
 
 def get_client() -> Anthropic:
