@@ -18,6 +18,29 @@ reconstructed.
 The scan target itself is `demo_project/` at the repository root (the
 "after"/vulnerable state).
 
+## Evaluation scenarios (`--baseline-mode`)
+
+The "before" commit defines *what scenario you are measuring*, and it materially
+affects the score. Choose the one that matches what the paper claims, and state
+it explicitly:
+
+- **`whole-file`** (empty-stub baseline) — every vulnerable file appears as
+  net-new code. This models *"this file is freshly AI-generated"*, which is
+  Autopsy's headline use case, and is how the original development eval was run.
+  The scanner sees each file as 100% new, so it attends to every function and
+  recall is higher and steadier.
+- **`safe`** (reconstructed clean baseline; the default here) — the diff is only
+  the change from safe code to vulnerable code. This models *"an AI edited
+  already-safe code and introduced a vulnerability"* — a stricter, more
+  conservative test. Recall is lower because the scanner focuses on the changed
+  hunks.
+
+Neither is "more correct" in the abstract; they answer different questions. Use
+`whole-file` if the paper's claim is about scanning AI-generated code, `safe` if
+it is about catching regressions introduced into existing code. Whichever you
+report, name the scenario in the paper. Do **not** report one scenario's number
+while having run the other.
+
 ## Matching rule
 
 A streamed finding matches a ground-truth entry when **all** hold:

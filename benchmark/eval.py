@@ -355,10 +355,11 @@ def _resolve_temperature(scan_stream) -> tuple[Optional[float], str]:
                   "model default (results vary slightly across runs)")
 
 
-def build_graph_and_diff(demo_dir: Path, baseline_dir: Path, repo_dir: Path):
+def build_graph_and_diff(demo_dir: Path, baseline_dir: Path, repo_dir: Path,
+                         mode: str = "safe"):
     """Build the eval repo, dependency graph, and diff. Returns (graph, diff, changed)."""
     parse_directory, build_dependency_graph, _ = _import_autopsy()
-    diff_text, changed_files = make_diff(baseline_dir, demo_dir, repo_dir)
+    diff_text, changed_files = make_diff(baseline_dir, demo_dir, repo_dir, mode=mode)
     parsed = parse_directory(repo_dir)
     graph = build_dependency_graph(parsed)
     return graph, diff_text, changed_files
@@ -381,13 +382,14 @@ def run_scan(graph, diff_text, changed_files, repo_dir, temperature):
 # ─── Single run ────────────────────────────────────────────────────────────────
 
 def run_single(
-    demo_dir: Path, baseline_dir: Path, all_truth, scored, fuzz, temperature
+    demo_dir: Path, baseline_dir: Path, all_truth, scored, fuzz, temperature,
+    mode="safe"
 ) -> dict:
     scored_ids = {t["id"] for t in scored}
     with tempfile.TemporaryDirectory() as tmp:
         repo_dir = Path(tmp) / "eval_repo"
         graph, diff_text, changed_files = build_graph_and_diff(
-            demo_dir, baseline_dir, repo_dir
+            demo_dir, baseline_dir, repo_dir, mode=mode
         )
         console.print(
             f"  Graph: {graph.number_of_nodes()} nodes, "
@@ -477,6 +479,7 @@ def run_eval(args):
     console.rule("[bold]Autopsy Evaluation Harness[/bold]")
     console.print(f"Demo project   : {args.demo}")
     console.print(f"Baseline       : {args.baseline}")
+    console.print(f"Baseline mode  : {args.baseline_mode}")
     console.print(f"Ground truth   : {len(scored)} scored "
                   f"({len(all_truth) - len(scored)} provisional excluded)")
     console.print(f"Fuzz lines     : {args.fuzz_lines}")
@@ -498,7 +501,7 @@ def run_eval(args):
         if args.repeat > 1:
             console.rule(f"[bold]Run {i + 1}/{args.repeat}[/bold]")
         run = run_single(args.demo, args.baseline, all_truth, scored,
-                         args.fuzz_lines, temperature)
+                         args.fuzz_lines, temperature, mode=args.baseline_mode)
         print_run_report(run, args.fuzz_lines)
         runs.append(run)
 
@@ -543,6 +546,7 @@ def summarize(runs, args, scored, all_truth, temp_note) -> dict:
         "config": {
             "demo": str(args.demo),
             "baseline": str(args.baseline),
+            "baseline_mode": args.baseline_mode,
             "fuzz_lines": args.fuzz_lines,
             "repeat": args.repeat,
             "include_provisional": args.include_provisional,
@@ -600,7 +604,7 @@ def run_offline(args, all_truth, scored) -> dict:
     with tempfile.TemporaryDirectory() as tmp:
         repo_dir = Path(tmp) / "eval_repo"
         graph, diff_text, changed_files = build_graph_and_diff(
-            args.demo, args.baseline, repo_dir
+            args.demo, args.baseline, repo_dir, mode=args.baseline_mode
         )
         console.print(f"[bold]Graph[/bold]: {graph.number_of_nodes()} nodes, "
                       f"{graph.number_of_edges()} edges")
@@ -653,6 +657,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Path to the vulnerable demo_project directory")
     p.add_argument("--baseline", type=Path, default=DEFAULT_BASELINE,
                    help="Path to the clean baseline directory")
+    p.add_argument("--baseline-mode", choices=["safe", "whole-file"], default="safe",
+                   help="Scenario: 'safe' diffs against the clean baseline; "
+                        "'whole-file' treats each vulnerable file as net-new "
+                        "AI-generated code (empty-stub baseline)")
     p.add_argument("--fuzz-lines", type=int, default=DEFAULT_FUZZ_LINES,
                    help="Line-distance tolerance for a match (default 5)")
     p.add_argument("--repeat", type=int, default=1,

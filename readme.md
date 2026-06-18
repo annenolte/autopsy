@@ -438,6 +438,11 @@ python benchmark/eval.py --repeat 5
 # Reproduce the looser legacy matching used during development
 python benchmark/eval.py --fuzz-lines 25
 
+# Choose the evaluation scenario (see benchmark/README.md):
+#   whole-file = each vulnerable file is net-new AI-generated code (original eval)
+#   safe       = diff against a clean baseline (default; harder, more conservative)
+python benchmark/eval.py --baseline-mode whole-file --repeat 5
+
 # Offline wiring check — builds the graph + diff and self-tests the
 # matcher without any API call (also the automatic fallback when no key is set)
 python benchmark/eval.py --dry-run

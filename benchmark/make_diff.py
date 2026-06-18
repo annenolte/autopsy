@@ -52,11 +52,22 @@ def _git(*args: str, cwd: Path) -> str:
     return result.stdout
 
 
-def build_eval_repo(baseline_dir: Path, demo_dir: Path, repo_dir: Path) -> Path:
+def build_eval_repo(
+    baseline_dir: Path, demo_dir: Path, repo_dir: Path, mode: str = "safe"
+) -> Path:
     """Create a git repo in repo_dir with a baseline commit then a vulnerable commit.
 
     Returns repo_dir. The working tree at HEAD holds the vulnerable demo files,
     which is what callers parse to build the dependency graph.
+
+    mode controls the "before" commit — i.e. the evaluation scenario:
+      "safe"       — the reconstructed clean baseline (benchmark/baseline/). Models
+                     "an AI edited already-safe code to introduce a vulnerability";
+                     the diff is the change only.
+      "whole-file" — empty stub files, so the entire vulnerable file appears as a
+                     net-new addition. Models "this whole file is freshly
+                     AI-generated code" (Autopsy's headline use case) and matches
+                     how the original development eval was run.
     """
     baseline_dir = Path(baseline_dir)
     demo_dir = Path(demo_dir)
@@ -82,7 +93,7 @@ def build_eval_repo(baseline_dir: Path, demo_dir: Path, repo_dir: Path) -> Path:
         dest = repo_dir / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         baseline_file = baseline_dir / rel
-        if baseline_file.exists():
+        if mode == "safe" and baseline_file.exists():
             dest.write_text(baseline_file.read_text())
         else:
             dest.write_text(f"# {rel.name} — clean baseline stub\n")
@@ -106,10 +117,10 @@ def build_eval_repo(baseline_dir: Path, demo_dir: Path, repo_dir: Path) -> Path:
 
 
 def make_diff(
-    baseline_dir: Path, demo_dir: Path, repo_dir: Path
+    baseline_dir: Path, demo_dir: Path, repo_dir: Path, mode: str = "safe"
 ) -> tuple[str, list[str]]:
     """Build the eval repo and return (unified_diff_text, changed_files)."""
-    build_eval_repo(baseline_dir, demo_dir, repo_dir)
+    build_eval_repo(baseline_dir, demo_dir, repo_dir, mode=mode)
     diff_text = _git("diff", "HEAD~1", "HEAD", cwd=repo_dir)
     name_only = _git("diff", "HEAD~1", "HEAD", "--name-only", cwd=repo_dir)
     changed_files = [ln.strip() for ln in name_only.splitlines() if ln.strip()]
@@ -122,6 +133,11 @@ def main() -> None:
     )
     parser.add_argument("--baseline", type=Path, default=DEFAULT_BASELINE)
     parser.add_argument("--demo", type=Path, default=DEFAULT_DEMO)
+    parser.add_argument(
+        "--mode", choices=["safe", "whole-file"], default="safe",
+        help="Baseline scenario: 'safe' clean baseline (diff only) or "
+             "'whole-file' empty stubs (entire file is net-new AI code)",
+    )
     parser.add_argument(
         "--out", type=Path, default=None, help="Optional path to also save the diff"
     )
@@ -136,7 +152,9 @@ def main() -> None:
 
     with tempfile.TemporaryDirectory() as tmp:
         repo_dir = Path(tmp) / "eval_repo"
-        diff_text, changed_files = make_diff(args.baseline, args.demo, repo_dir)
+        diff_text, changed_files = make_diff(
+            args.baseline, args.demo, repo_dir, mode=args.mode
+        )
 
     sys.stdout.write(diff_text)
     if args.out:
