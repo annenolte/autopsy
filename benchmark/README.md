@@ -41,6 +41,29 @@ it is about catching regressions introduced into existing code. Whichever you
 report, name the scenario in the paper. Do **not** report one scenario's number
 while having run the other.
 
+## Ablation: does the graph actually help? (`--arm`)
+
+The central claim of the tool is that a dependency graph enables cross-file
+reasoning a plain LLM cannot do. The harness can test that claim directly:
+
+```bash
+python benchmark/eval.py --arm both --repeat 5      # side-by-side comparison
+python benchmark/eval.py --arm raw                   # control only
+```
+
+- **`autopsy`** — the full pipeline (graph summary + Haiku triage + blast radius
+  + diff, then Sonnet).
+- **`raw`** — the **same** analysis model and the **same** `SCAN_SYSTEM` prompt,
+  handed the same raw material (full source of the files + the diff) but **none**
+  of the graph-derived context. Findings are parsed and matched identically.
+
+Because model, prompt, and scorer are held constant, any score difference is
+attributable to the graph pipeline. `--arm both` prints a Δ table. Watch the
+cross-file finding `auth-ignored-return` in particular: that is exactly the case
+the graph is supposed to win, so it is the most informative single data point for
+whether the architecture earns its keep. **This comparison — not the absolute
+F1 — is what makes the evaluation a research result rather than a demo.**
+
 ## Matching rule
 
 A streamed finding matches a ground-truth entry when **all** hold:

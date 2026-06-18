@@ -379,12 +379,52 @@ def run_scan(graph, diff_text, changed_files, repo_dir, temperature):
     return "".join(chunks), time.time() - t0
 
 
+def run_raw_llm_scan(repo_dir, diff_text, changed_files, temperature):
+    """Ablation baseline: ask Sonnet directly, with NO graph machinery.
+
+    This is the control for "does Autopsy's dependency graph / triage / blast
+    radius actually help?". It uses the *same* analysis model and the *same*
+    SCAN_SYSTEM prompt as Autopsy, and is handed the same raw material (full
+    source of the changed files + the diff) — but none of the graph-derived
+    context (no dependency summary, no triage, no blast radius). Findings are
+    parsed and matched identically, so any score difference is attributable to
+    the graph pipeline, not to the model or the scorer.
+    """
+    from autopsy.llm.client import stream_sonnet
+    from autopsy.llm.prompts import SCAN_SYSTEM
+
+    repo_dir = Path(repo_dir)
+    parts = ["## Source Files\n"]
+    for p in sorted(repo_dir.rglob("*.py")):
+        rel = p.relative_to(repo_dir)
+        parts.append(f"### {rel}\n```\n{p.read_text(errors='replace')}\n```\n")
+    parts.append(f"\n## Git Diff\n```diff\n{diff_text}\n```")
+    user_msg = (
+        "\n".join(parts)
+        + "\n\n## Task\nAnalyze the git diff for security vulnerabilities. "
+        "Report each finding using the ## [SEVERITY: ...] format above."
+    )
+    # stream_sonnet exposes no temperature knob today (see _resolve_temperature);
+    # the parameter is accepted for symmetry and forwarded only if supported.
+    if temperature is not None and "temperature" in inspect.signature(stream_sonnet).parameters:
+        gen = stream_sonnet(SCAN_SYSTEM, user_msg, temperature=temperature)
+    else:
+        gen = stream_sonnet(SCAN_SYSTEM, user_msg)
+    t0 = time.time()
+    chunks = []
+    for chunk in gen:
+        chunks.append(chunk)
+        console.print(chunk, end="", highlight=False)
+    return "".join(chunks), time.time() - t0
+
+
 # ─── Single run ────────────────────────────────────────────────────────────────
 
 def run_single(
     demo_dir: Path, baseline_dir: Path, all_truth, scored, fuzz, temperature,
-    mode="safe"
+    mode="safe", arm="autopsy"
 ) -> dict:
+    """Run one scan with the given arm ('autopsy' = full pipeline, 'raw' = no graph)."""
     scored_ids = {t["id"] for t in scored}
     with tempfile.TemporaryDirectory() as tmp:
         repo_dir = Path(tmp) / "eval_repo"
@@ -392,18 +432,22 @@ def run_single(
             demo_dir, baseline_dir, repo_dir, mode=mode
         )
         console.print(
-            f"  Graph: {graph.number_of_nodes()} nodes, "
+            f"  [{arm}] Graph: {graph.number_of_nodes()} nodes, "
             f"{graph.number_of_edges()} edges | "
             f"Diff: {len(diff_text.splitlines())} lines, "
             f"{len(changed_files)} changed files"
         )
-        output, elapsed = run_scan(graph, diff_text, changed_files, repo_dir, temperature)
+        if arm == "raw":
+            output, elapsed = run_raw_llm_scan(repo_dir, diff_text, changed_files, temperature)
+        else:
+            output, elapsed = run_scan(graph, diff_text, changed_files, repo_dir, temperature)
 
     findings = parse_findings(output)
     m = match(findings, all_truth, scored_ids, fuzz)
     metrics = metrics_from_counts(m["tp"], m["fp"], m["fn"])
 
     return {
+        "arm": arm,
         "metrics": metrics,
         "counts": {"tp": m["tp"], "fp": m["fp"], "fn": m["fn"],
                    "total_findings": len(findings)},
@@ -484,6 +528,9 @@ def run_eval(args):
                   f"({len(all_truth) - len(scored)} provisional excluded)")
     console.print(f"Fuzz lines     : {args.fuzz_lines}")
     console.print(f"Temperature    : {temp_note}")
+    arms = ["autopsy", "raw"] if args.arm == "both" else [args.arm]
+    console.print(f"Arm(s)         : {', '.join(arms)} "
+                  f"(autopsy=full pipeline, raw=Sonnet with no graph)")
     console.print(f"Repeat         : {args.repeat}\n")
 
     has_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
@@ -495,22 +542,55 @@ def run_eval(args):
     if offline:
         return run_offline(args, all_truth, scored)
 
-    # ── Live run(s) ──
-    runs = []
+    # ── Live run(s) ── one paired iteration per repeat, each arm on its own repo
+    runs_by_arm: dict[str, list] = {a: [] for a in arms}
     for i in range(args.repeat):
-        if args.repeat > 1:
-            console.rule(f"[bold]Run {i + 1}/{args.repeat}[/bold]")
-        run = run_single(args.demo, args.baseline, all_truth, scored,
-                         args.fuzz_lines, temperature, mode=args.baseline_mode)
-        print_run_report(run, args.fuzz_lines)
-        runs.append(run)
+        for arm in arms:
+            if args.repeat > 1 or len(arms) > 1:
+                console.rule(f"[bold]Run {i + 1}/{args.repeat} — arm: {arm}[/bold]")
+            run = run_single(args.demo, args.baseline, all_truth, scored,
+                             args.fuzz_lines, temperature,
+                             mode=args.baseline_mode, arm=arm)
+            print_run_report(run, args.fuzz_lines)
+            runs_by_arm[arm].append(run)
 
-    summary = summarize(runs, args, scored, all_truth, temp_note)
-    write_results(summary, args)
-    return summary
+    summaries = {}
+    for arm in arms:
+        summaries[arm] = summarize(runs_by_arm[arm], args, scored, all_truth,
+                                   temp_note, arm=arm)
+        write_results(summaries[arm], args, arm=arm)
+
+    if len(arms) > 1:
+        print_comparison(summaries)
+
+    return summaries if len(arms) > 1 else summaries[arms[0]]
 
 
-def summarize(runs, args, scored, all_truth, temp_note) -> dict:
+def print_comparison(summaries: dict):
+    """Side-by-side Autopsy vs raw-LLM comparison — the headline ablation."""
+    console.rule("[bold]Ablation: Autopsy (graph pipeline) vs raw Sonnet (no graph)[/bold]")
+    table = Table(show_header=True)
+    table.add_column("Metric", style="bold")
+    table.add_column("Autopsy", justify="right")
+    table.add_column("raw Sonnet", justify="right")
+    table.add_column("Δ (Autopsy − raw)", justify="right")
+    a = summaries.get("autopsy", {}).get("aggregate", {})
+    r = summaries.get("raw", {}).get("aggregate", {})
+    for name in ("precision", "recall", "f1"):
+        av = a.get(name, {}).get("mean_pct", 0)
+        rv = r.get(name, {}).get("mean_pct", 0)
+        delta = av - rv
+        sign = "+" if delta >= 0 else ""
+        table.add_row(name.capitalize(), f"{av}%", f"{rv}%", f"{sign}{delta} pp")
+    console.print(table)
+    console.print(
+        "[dim]Same model, same prompt, same scorer — the only difference is the "
+        "dependency-graph pipeline. A positive Δ is evidence the graph adds value; "
+        "look especially at the cross-file finding auth-ignored-return.[/dim]"
+    )
+
+
+def summarize(runs, args, scored, all_truth, temp_note, arm="autopsy") -> dict:
     precisions = [r["metrics"]["precision"] for r in runs]
     recalls = [r["metrics"]["recall"] for r in runs]
     f1s = [r["metrics"]["f1"] for r in runs]
@@ -531,7 +611,7 @@ def summarize(runs, args, scored, all_truth, temp_note) -> dict:
     }
 
     if args.repeat > 1:
-        table = Table(title=f"Aggregate over {args.repeat} runs (mean +/- std)")
+        table = Table(title=f"[{arm}] Aggregate over {args.repeat} runs (mean +/- std)")
         table.add_column("Metric", style="bold")
         table.add_column("Mean", justify="right")
         table.add_column("Std (pp)", justify="right")
@@ -542,8 +622,10 @@ def summarize(runs, args, scored, all_truth, temp_note) -> dict:
 
     return {
         "mode": "live",
+        "arm": arm,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "config": {
+            "arm": arm,
             "demo": str(args.demo),
             "baseline": str(args.baseline),
             "baseline_mode": args.baseline_mode,
@@ -586,10 +668,10 @@ def _model_ids():
     return HAIKU_MODEL, SONNET_MODEL
 
 
-def write_results(summary: dict, args):
+def write_results(summary: dict, args, arm="autopsy"):
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     ts = time.strftime("%Y%m%d_%H%M%S")
-    out = RESULTS_DIR / f"eval_{ts}.json"
+    out = RESULTS_DIR / f"eval_{arm}_{ts}.json"
     out.write_text(json.dumps(summary, indent=2))
     console.print(f"\n[green]Results written to {out}[/green]")
 
@@ -665,6 +747,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Line-distance tolerance for a match (default 5)")
     p.add_argument("--repeat", type=int, default=1,
                    help="Number of live runs; reports mean +/- std when > 1")
+    p.add_argument("--arm", choices=["autopsy", "raw", "both"], default="autopsy",
+                   help="Which scanner to evaluate: 'autopsy' full graph pipeline, "
+                        "'raw' Sonnet with no graph (ablation control), or 'both' "
+                        "to run the side-by-side comparison")
     p.add_argument("--include-provisional", action="store_true",
                    help="Score provisional ground-truth entries as well")
     p.add_argument("--dry-run", action="store_true",

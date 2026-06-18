@@ -443,6 +443,10 @@ python benchmark/eval.py --fuzz-lines 25
 #   safe       = diff against a clean baseline (default; harder, more conservative)
 python benchmark/eval.py --baseline-mode whole-file --repeat 5
 
+# Ablation: does the dependency graph beat just asking the model? Same model,
+# same prompt, same scorer — the only difference is Autopsy's graph pipeline.
+python benchmark/eval.py --arm both --repeat 5
+
 # Offline wiring check — builds the graph + diff and self-tests the
 # matcher without any API call (also the automatic fallback when no key is set)
 python benchmark/eval.py --dry-run
