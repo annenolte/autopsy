@@ -134,6 +134,11 @@ _CATEGORY_RULES = [
                   "eval(", "remote code")),
     ("deserial", ("deserial", "pickle", "unsafe yaml", "yaml.load",
                   "insecure deserialization", "object injection")),
+    # Generic umbrella token: the LLM often labels a specific injection bug just
+    # "Injection". This token lets such a label bridge to any injection-family
+    # ground-truth category (see categories_match) without collapsing the
+    # specific classes into each other.
+    ("injection", ("injection",)),
     ("auth", ("auth", "authz", "authn", "permission", "access control",
               "privilege", "authoriz")),
     ("crypto", ("crypto", "secret", "weak hash", "md5", "sha1",
@@ -155,11 +160,27 @@ def category_tokens(raw: str) -> set[str]:
     return {token for token, needles in _CATEGORY_RULES if any(n in s for n in needles)}
 
 
+_INJECTION_FAMILY = {"sql", "command", "codeexec", "deserial"}
+
+
 def categories_match(finding_category: str, accepted: list[str]) -> bool:
-    """True if the finding's category overlaps any accepted ground-truth category."""
+    """True if the finding's category overlaps any accepted ground-truth category.
+
+    A generic "injection" label on one side bridges to any specific
+    injection-family class on the other (e.g. the model reporting a pickle bug as
+    "Injection" still matches a "Insecure Deserialization" ground-truth entry).
+    The specific classes do not bridge to each other — only via the generic
+    token — so e.g. SQLi and command injection stay distinct.
+    """
     f = category_tokens(finding_category)
     a = set().union(*(category_tokens(c) for c in accepted)) if accepted else set()
-    return bool(f & a)
+    if f & a:
+        return True
+    if "injection" in f and (a & _INJECTION_FAMILY):
+        return True
+    if "injection" in a and (f & _INJECTION_FAMILY):
+        return True
+    return False
 
 
 # ─── Finding parser ─────────────────────────────────────────────────────────
