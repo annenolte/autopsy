@@ -12,6 +12,14 @@ it does not establish performance on unseen data. A genuinely blind number
 requires a fresh target the protocol never saw (e.g. the TypeScript LLM run,
 not yet executed).
 
+## CODE FROZEN for the one-time paid evaluation
+As of the commit that adds this note, the **detection code and the scoring/eval
+harness are frozen**. No further changes will be made that could alter results.
+This means a single paid evaluation run produces the numbers to report — the
+spend does not need to be repeated because the code changed afterward.
+(Deliberately NOT done, to avoid teaching-to-the-test / false-positive risk:
+broadening the deterministic detectors. The LLM already covers those cases.)
+
 ## Frozen components
 - **Matcher** (`benchmark/eval.py`): a finding matches a ground-truth entry iff
   file basename matches AND normalized category matches (with the generic

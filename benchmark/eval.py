@@ -424,6 +424,17 @@ def _resolve_temperature(scan_stream) -> tuple[Optional[float], str]:
                   "model default (results vary slightly across runs)")
 
 
+def count_loc(demo_dir: Path) -> int:
+    """Total source lines of the scan target (.py/.js/.ts/.tsx). For #14 cost/time
+    normalization."""
+    exts = (".py", ".js", ".ts", ".tsx")
+    total = 0
+    for p in Path(demo_dir).rglob("*"):
+        if p.suffix in exts and p.is_file():
+            total += len(p.read_text(errors="replace").splitlines())
+    return total
+
+
 def build_graph_and_diff(demo_dir: Path, baseline_dir: Path, repo_dir: Path,
                          mode: str = "safe"):
     """Build the eval repo, dependency graph, and diff. Returns (graph, diff, changed)."""
@@ -529,11 +540,17 @@ def run_single(
     m = match(findings, all_truth, scored_ids, fuzz)
     metrics = metrics_from_counts(m["tp"], m["fp"], m["fn"])
 
+    loc = count_loc(demo_dir)
+    n_scored = len(scored) or 1
+
     return {
         "arm": arm,
         "metrics": metrics,
         "counts": {"tp": m["tp"], "fp": m["fp"], "fn": m["fn"],
                    "total_findings": len(findings)},
+        "target_loc": loc,
+        "scan_time_per_kloc": round(elapsed / (loc / 1000), 1) if loc else 0,
+        "scan_time_per_vuln": round(elapsed / n_scored, 1),
         "matched_ids": m["matched_scored"],
         "missed_ids": m["missed_ids"],
         "provisional_matched_ids": m["matched_provisional"],
@@ -565,6 +582,9 @@ def print_run_report(run: dict, fuzz: int):
     table.add_row("Recall", f"{_pct(metrics['recall'])}%")
     table.add_row("F1 Score", f"{_pct(metrics['f1'])}%")
     table.add_row("Scan Time", f"{run['scan_time_seconds']}s")
+    table.add_row("Target LOC", str(run.get("target_loc", 0)))
+    table.add_row("Time / KLOC", f"{run.get('scan_time_per_kloc', 0)}s")
+    table.add_row("Time / vuln", f"{run.get('scan_time_per_vuln', 0)}s")
     table.add_row("Fuzz (+/- lines)", str(fuzz))
     console.print(table)
 
@@ -761,6 +781,9 @@ def summarize(runs, args, scored, all_truth, temp_note, arm="autopsy") -> dict:
             "provisional_matched_ids": r["provisional_matched_ids"],
             "category_mismatches": r["category_mismatches"],
             "scan_time_seconds": r["scan_time_seconds"],
+            "target_loc": r.get("target_loc", 0),
+            "scan_time_per_kloc": r.get("scan_time_per_kloc", 0),
+            "scan_time_per_vuln": r.get("scan_time_per_vuln", 0),
             "findings": r["findings"],
             "raw_output": r["raw_output"],
         } for r in runs],
