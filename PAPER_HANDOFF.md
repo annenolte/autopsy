@@ -243,6 +243,38 @@ python benchmark/per_category.py --results <results.json> --ground-truth <gt.jso
 
 ---
 
+## 9b. Additional experiments (#9, #2, #16) — added after the first handoff
+
+### #9 — AI-authorship heuristic validated as a classifier (NEGATIVE result)
+Labeled set from **SecurityEval**: 260 AI files (Copilot+InCoder) vs 121 human.
+Deterministic heuristic: **ROC-AUC 0.42 (≈/below random), recall 0% @0.5**, AI
+mean confidence 0.25 < human 0.28. **The heuristic does NOT distinguish AI from
+human code.** ⚠️ **Paper action: descope the authorship detector** (present as
+future work), and **report vulnerability detection separately from authorship**.
+(`benchmark/eval_authorship_classifier.py`, `AUTHORSHIP.md`.)
+
+### #2 — Established benchmark: SecurityEval (121 CWE-labeled files)
+Now on TWO external benchmarks (pygoat + SecurityEval). Token-free baselines on
+SecurityEval (per-file detection = recall): Autopsy-deterministic **3%**, Semgrep
+**19%**, Bandit **40%**. ⚠️ The **Autopsy LLM number on SecurityEval is NOT yet
+measured** (staged, needs tokens). SecurityEval is hard for SAST (69 diverse
+CWEs) — expected. (`benchmark/eval_securityeval.py`, `SECURITYEVAL.md`.)
+
+### #16 — Sonnet-only vs Haiku+Sonnet ablation (built, staged)
+`scan_stream(use_triage=False)` + `--arm sonnet-only` / `--arm all`
+(autopsy vs sonnet-only vs raw) isolate whether the Haiku triage step helps.
+Code is built and tested; ⚠️ **the comparison run needs tokens** (staged).
+
+### Updated one-time paid batch (buy ~$25 for margin)
+```bash
+python benchmark/eval.py --arm all --repeat 5                              # demo: graph vs triage vs raw (#11,#16)
+python benchmark/eval.py --demo /tmp/pygoat/introduction \
+  --ground-truth benchmark/pygoat/ground_truth_pygoat.json \
+  --baseline-mode whole-file --chunked --arm both --repeat 5               # pygoat CI
+python benchmark/eval.py --demo /tmp/SecurityEval/Testcases_Insecure_Code \
+  --baseline-mode whole-file --chunked --arm both                          # SecurityEval Autopsy LLM (#2)
+```
+
 ## 9. Not done / needs tokens (be explicit in the paper)
 - Truly-blind run on a fresh target (TS LLM scan); larger CIs.
 - Established benchmarks the reviewer named (CWE-Bench-Java [Java, unsupported],
