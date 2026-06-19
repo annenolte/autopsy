@@ -245,16 +245,25 @@ def scan_stream(
             detect_ignored_security_returns,
             format_ignored_return_findings,
         )
+        from autopsy.detection.static_rules import (
+            detect_static_rules,
+            format_static_findings,
+        )
 
         if root_dir is not None:
-            ignored = detect_ignored_security_returns(
-                root_dir, only_files=changed_files or None
-            )
+            only = changed_files or None
+            blocks = []
+            ignored = detect_ignored_security_returns(root_dir, only_files=only)
             if ignored:
-                deterministic_findings_md = format_ignored_return_findings(ignored)
+                blocks.append(format_ignored_return_findings(ignored))
+            static = detect_static_rules(root_dir, only_files=only)
+            if static:
+                blocks.append(format_static_findings(static))
+            if blocks:
+                deterministic_findings_md = "\n".join(blocks)
                 yield deterministic_findings_md + "\n"
     except Exception as e:  # pragma: no cover — defensive
-        yield f"[note] Ignored-return analysis skipped: {e}\n\n"
+        yield f"[note] Static analysis skipped: {e}\n\n"
 
     # Phase 0: AI-generated code detection
     from autopsy.detection.heuristics import analyze_diff as detect_ai
