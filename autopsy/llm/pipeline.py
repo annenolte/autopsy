@@ -165,10 +165,15 @@ def scan_stream(
     diff_text: str,
     changed_files: list[str],
     root_dir: Path | None = None,
+    use_triage: bool = True,
 ) -> Iterator[str]:
     """SCAN THIS: Scan diff for vulnerabilities with graph context.
 
     Yields text chunks for real-time display.
+
+    use_triage=False skips the Haiku triage step (graph + Sonnet only) — used by
+    the eval's "sonnet-only" arm to measure whether Haiku triage adds value
+    (reviewer #16). Default True preserves the normal Haiku+Sonnet pipeline.
     """
     # ------------------------------------------------------------------
     # Deletion analysis — runs BEFORE the existing addition/modification
@@ -369,13 +374,16 @@ def scan_stream(
         extra=f"{ai_context}\n## Git Diff\n```diff\n{diff_text}\n```",
     )
 
-    try:
-        triage_raw = call_haiku(TRIAGE_SYSTEM, f"{context}\n\n## Query\nFind security vulnerabilities in the changed code, especially in AI-generated sections.")
-    except RuntimeError as e:
-        yield f"[Triage error: {e}]\n"
-        return
-
-    yield f"Triage complete.\n\n"
+    if use_triage:
+        try:
+            triage_raw = call_haiku(TRIAGE_SYSTEM, f"{context}\n\n## Query\nFind security vulnerabilities in the changed code, especially in AI-generated sections.")
+        except RuntimeError as e:
+            yield f"[Triage error: {e}]\n"
+            return
+        yield f"Triage complete.\n\n"
+    else:
+        triage_raw = ""
+        yield "Triage skipped (sonnet-only arm).\n\n"
 
     # Phase 2: Compute blast radius for functions in changed files
     blast_context = ""

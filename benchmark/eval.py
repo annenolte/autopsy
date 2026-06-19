@@ -446,11 +446,12 @@ def build_graph_and_diff(demo_dir: Path, baseline_dir: Path, repo_dir: Path,
 
 
 def run_scan(graph, diff_text, changed_files, repo_dir, temperature,
-             chunked=False, window=400):
+             chunked=False, window=400, use_triage=True):
     """Invoke the scan and return the concatenated streamed output + elapsed.
 
     chunked=True uses the map-reduce scanner (windows every file so large files
     aren't truncated); otherwise the single-shot scan_stream.
+    use_triage=False skips the Haiku triage step (sonnet-only arm, #16).
     """
     t0 = time.time()
     chunks = []
@@ -463,7 +464,8 @@ def run_scan(graph, diff_text, changed_files, repo_dir, temperature,
         kwargs = {}
         if temperature is not None:
             kwargs["temperature"] = temperature
-        stream = scan_stream(graph, diff_text, changed_files, root_dir=repo_dir, **kwargs)
+        stream = scan_stream(graph, diff_text, changed_files, root_dir=repo_dir,
+                             use_triage=use_triage, **kwargs)
     for chunk in stream:
         chunks.append(chunk)
         console.print(chunk, end="", highlight=False)
@@ -531,8 +533,10 @@ def run_single(
         if arm == "raw":
             output, elapsed = run_raw_llm_scan(repo_dir, diff_text, changed_files, temperature)
         else:
+            # "sonnet-only" = full graph pipeline but no Haiku triage (#16)
             output, elapsed = run_scan(graph, diff_text, changed_files, repo_dir,
-                                       temperature, chunked=chunked, window=window)
+                                       temperature, chunked=chunked, window=window,
+                                       use_triage=(arm != "sonnet-only"))
 
     findings = parse_findings(output)
     if dedupe:
@@ -631,9 +635,15 @@ def run_eval(args):
                   f"({len(all_truth) - len(scored)} provisional excluded)")
     console.print(f"Fuzz lines     : {args.fuzz_lines}")
     console.print(f"Temperature    : {temp_note}")
-    arms = ["autopsy", "raw"] if args.arm == "both" else [args.arm]
+    if args.arm == "both":
+        arms = ["autopsy", "raw"]
+    elif args.arm == "all":
+        arms = ["autopsy", "sonnet-only", "raw"]
+    else:
+        arms = [args.arm]
     console.print(f"Arm(s)         : {', '.join(arms)} "
-                  f"(autopsy=full pipeline, raw=Sonnet with no graph)")
+                  f"(autopsy=graph+Haiku+Sonnet, sonnet-only=graph+Sonnet no triage, "
+                  f"raw=Sonnet no graph)")
     console.print(f"Repeat         : {args.repeat}\n")
 
     has_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
@@ -877,10 +887,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Line-distance tolerance for a match (default 5)")
     p.add_argument("--repeat", type=int, default=1,
                    help="Number of live runs; reports mean +/- std when > 1")
-    p.add_argument("--arm", choices=["autopsy", "raw", "both"], default="autopsy",
-                   help="Which scanner to evaluate: 'autopsy' full graph pipeline, "
-                        "'raw' Sonnet with no graph (ablation control), or 'both' "
-                        "to run the side-by-side comparison")
+    p.add_argument("--arm", choices=["autopsy", "sonnet-only", "raw", "both", "all"],
+                   default="autopsy",
+                   help="autopsy=graph+Haiku triage+Sonnet; sonnet-only=graph+Sonnet "
+                        "(no Haiku triage, #16); raw=Sonnet no graph (#11); "
+                        "both=autopsy+raw; all=autopsy+sonnet-only+raw")
     p.add_argument("--include-provisional", action="store_true",
                    help="Score provisional ground-truth entries as well")
     p.add_argument("--no-dedupe", action="store_true",
