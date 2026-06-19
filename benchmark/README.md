@@ -14,6 +14,25 @@ reconstructed.
 | `make_diff.py` | Builds a 2-commit temp git repo (baseline → vulnerable) and emits the unified diff, mirroring `autopsy scan`. |
 | `eval.py` | Runs the scan against the diff, parses findings, matches them to ground truth, and reports precision / recall / F1. |
 | `results/` | Per-run JSON output (gitignored). |
+| `heldout/` + `validate_heldout.py` | A separate orders project (vulnerable + safe) used to prove the deterministic detectors generalize and don't false-positive. Not scored. |
+
+## Deterministic detector layer
+
+Autopsy now has two layers: deterministic AST/graph rules
+(`autopsy/detection/ignored_returns.py`, `autopsy/detection/static_rules.py`)
+and the LLM scan. The deterministic layer is **scale-invariant** — it fires
+identically on a 200-line demo and a huge repo, in linear time, with no
+context-window limit — so it is what keeps recall up as a codebase grows.
+Current rules: ignored cross-file authorization-gate returns, SQL strings built
+from interpolated parameters that reach a sink, and weak hashing (md5/sha1).
+
+> **Evaluation honesty — read this before reporting numbers.** Findings from the
+> deterministic layer are static analysis, *not* evidence of LLM reasoning. They
+> will catch several planted bugs on their own and push F1 up. When you report
+> results, **attribute the static layer and the LLM layer separately**, and do
+> not tune rules to `demo_project` — `benchmark/heldout/` exists to show the
+> rules were validated on code they were not written against
+> (`python benchmark/validate_heldout.py`).
 
 The scan target itself is `demo_project/` at the repository root (the
 "after"/vulnerable state).
