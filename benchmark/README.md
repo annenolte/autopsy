@@ -105,6 +105,13 @@ Matching is one-to-one (a finding can satisfy at most one entry and vice versa);
 ties break by smallest line distance. `--fuzz-lines 25` reproduces the looser
 tolerance used during development.
 
+Before matching, findings are **deduplicated**: two findings at the same
+location (same file, within 3 lines) with overlapping categories are merged, so
+a single issue reported twice (e.g. by both the deterministic layer and the LLM)
+is not counted as two false positives. The window is tight enough that distinct
+nearby findings (e.g. `execute_query` vs `execute_read`) are preserved. Disable
+with `--no-dedupe`.
+
 ## ⚠️ Reconstruction notice (please confirm)
 
 - **`baseline/` is a reconstruction, not recovered source.** No

@@ -326,6 +326,40 @@ def _pct(x: float) -> int:
     return round(x * 100)
 
 
+def dedupe_findings(findings: list[dict], window: int = 3) -> list[dict]:
+    """Collapse findings that describe the same vulnerability.
+
+    Two findings are duplicates when their categories overlap (after
+    normalization) and each has a location in the same file within `window`
+    lines of the other. This happens because the deterministic layer emits a
+    finding and the LLM occasionally re-reports the same one despite being told
+    not to. Counting one real issue twice as two false positives is a
+    measurement artifact, not a real precision loss — so we merge them before
+    scoring. The window is intentionally tight (default 3) so genuinely distinct
+    nearby findings (e.g. execute_query vs execute_read) are NOT merged.
+    """
+    kept: list[dict] = []
+    for f in findings:
+        f_tokens = category_tokens(f["category"])
+        is_dup = False
+        for k in kept:
+            if not (f_tokens & category_tokens(k["category"])):
+                continue
+            for lf in f["locations"]:
+                for lk in k["locations"]:
+                    if (Path(lf["file"]).name.lower() == Path(lk["file"]).name.lower()
+                            and abs(lf["line"] - lk["line"]) <= window):
+                        is_dup = True
+                        break
+                if is_dup:
+                    break
+            if is_dup:
+                break
+        if not is_dup:
+            kept.append(f)
+    return kept
+
+
 # ─── Scan invocation ─────────────────────────────────────────────────────────
 
 def _import_autopsy():
@@ -422,7 +456,7 @@ def run_raw_llm_scan(repo_dir, diff_text, changed_files, temperature):
 
 def run_single(
     demo_dir: Path, baseline_dir: Path, all_truth, scored, fuzz, temperature,
-    mode="safe", arm="autopsy"
+    mode="safe", arm="autopsy", dedupe=True
 ) -> dict:
     """Run one scan with the given arm ('autopsy' = full pipeline, 'raw' = no graph)."""
     scored_ids = {t["id"] for t in scored}
@@ -443,6 +477,8 @@ def run_single(
             output, elapsed = run_scan(graph, diff_text, changed_files, repo_dir, temperature)
 
     findings = parse_findings(output)
+    if dedupe:
+        findings = dedupe_findings(findings)
     m = match(findings, all_truth, scored_ids, fuzz)
     metrics = metrics_from_counts(m["tp"], m["fp"], m["fn"])
 
@@ -550,7 +586,8 @@ def run_eval(args):
                 console.rule(f"[bold]Run {i + 1}/{args.repeat} — arm: {arm}[/bold]")
             run = run_single(args.demo, args.baseline, all_truth, scored,
                              args.fuzz_lines, temperature,
-                             mode=args.baseline_mode, arm=arm)
+                             mode=args.baseline_mode, arm=arm,
+                             dedupe=not args.no_dedupe)
             print_run_report(run, args.fuzz_lines)
             runs_by_arm[arm].append(run)
 
@@ -629,6 +666,7 @@ def summarize(runs, args, scored, all_truth, temp_note, arm="autopsy") -> dict:
             "demo": str(args.demo),
             "baseline": str(args.baseline),
             "baseline_mode": args.baseline_mode,
+            "dedupe": not args.no_dedupe,
             "fuzz_lines": args.fuzz_lines,
             "repeat": args.repeat,
             "include_provisional": args.include_provisional,
@@ -753,6 +791,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "to run the side-by-side comparison")
     p.add_argument("--include-provisional", action="store_true",
                    help="Score provisional ground-truth entries as well")
+    p.add_argument("--no-dedupe", action="store_true",
+                   help="Disable merging of duplicate findings at the same "
+                        "location+category (dedupe is on by default)")
     p.add_argument("--dry-run", action="store_true",
                    help="Offline: build graph + diff + matcher wiring, no LLM call")
     return p
