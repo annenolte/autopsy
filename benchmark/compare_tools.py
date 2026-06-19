@@ -72,11 +72,11 @@ def run_semgrep(target: Path, config: str = "p/python") -> list[dict]:
 def run_bandit(target: Path) -> list[dict]:
     """Run Bandit (Python security linter); return findings."""
     proc = subprocess.run(
-        [_venv_bin("bandit"), "-r", "-f", "json", str(target)],
+        [_venv_bin("bandit"), "-q", "-r", "-f", "json", str(target)],
         capture_output=True, text=True,
     )
     try:
-        data = json.loads(proc.stdout)
+        data = json.loads(proc.stdout[proc.stdout.find("{"):])  # strip progress-bar prefix
     except json.JSONDecodeError:
         print(f"[bandit] could not parse output: {proc.stderr[:300]}", file=sys.stderr)
         return []
