@@ -123,13 +123,25 @@ def load_ground_truth(
 # the tool's "Secrets Exposure" / "weak password hashing" wording.
 
 _CATEGORY_RULES = [
-    ("sql", ("sql", "injection")),
-    ("auth", ("auth", "authz", "authn", "permission", "access control", "privilege")),
-    ("crypto", ("crypto", "secret", "hash", "md5", "sha1", "password storage")),
-    ("xss", ("xss", "cross-site")),
+    # Order does not matter: category_tokens() returns the set of ALL matching
+    # tokens, and a match needs only a non-empty overlap. Keep needles specific
+    # so distinct injection classes don't collapse into one another (e.g.
+    # "command injection" must NOT read as SQL).
+    ("sql", ("sql injection", "sqli", "sql")),
+    ("command", ("command injection", "os command", "shell injection",
+                 "command execution", "rce")),
+    ("codeexec", ("code injection", "arbitrary code", "code execution",
+                  "eval(", "remote code")),
+    ("deserial", ("deserial", "pickle", "unsafe yaml", "yaml.load",
+                  "insecure deserialization", "object injection")),
+    ("auth", ("auth", "authz", "authn", "permission", "access control",
+              "privilege", "authoriz")),
+    ("crypto", ("crypto", "secret", "weak hash", "md5", "sha1",
+                "password storage", "weak cipher")),
+    ("ssrf", ("ssrf", "server-side request")),
+    ("xss", ("xss", "cross-site script")),
     ("path", ("path traversal", "directory traversal")),
-    ("ssrf", ("ssrf",)),
-    ("race", ("race",)),
+    ("race", ("race condition",)),
 ]
 
 
@@ -551,7 +563,7 @@ def print_run_report(run: dict, fuzz: int):
 
 def run_eval(args):
     all_truth, scored = load_ground_truth(
-        GROUND_TRUTH_PATH, include_provisional=args.include_provisional
+        args.ground_truth, include_provisional=args.include_provisional
     )
     parse_directory, build_dependency_graph, scan_stream = _import_autopsy()
     temperature, temp_note = _resolve_temperature(scan_stream)
@@ -777,6 +789,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Path to the vulnerable demo_project directory")
     p.add_argument("--baseline", type=Path, default=DEFAULT_BASELINE,
                    help="Path to the clean baseline directory")
+    p.add_argument("--ground-truth", type=Path, default=GROUND_TRUTH_PATH,
+                   help="Path to a ground_truth.json (default: the demo's). "
+                        "Use benchmark/pygoat/ground_truth_pygoat.json for pygoat.")
     p.add_argument("--baseline-mode", choices=["safe", "whole-file"], default="safe",
                    help="Scenario: 'safe' diffs against the clean baseline; "
                         "'whole-file' treats each vulnerable file as net-new "
