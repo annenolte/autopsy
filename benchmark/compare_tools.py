@@ -42,10 +42,10 @@ def _venv_bin(name: str) -> str:
     return str(cand) if cand.exists() else name
 
 
-def run_semgrep(target: Path) -> list[dict]:
-    """Run Semgrep with the standard Python security rules; return findings."""
+def run_semgrep(target: Path, config: str = "p/python") -> list[dict]:
+    """Run Semgrep with the given ruleset config; return findings."""
     proc = subprocess.run(
-        [_venv_bin("semgrep"), "scan", "--config=p/python", "--json",
+        [_venv_bin("semgrep"), "scan", f"--config={config}", "--json",
          "--quiet", str(target)],
         capture_output=True, text=True,
     )
@@ -127,13 +127,18 @@ def main():
     p.add_argument("--fuzz-lines", type=int, default=5)
     p.add_argument("--tools", default="semgrep,bandit",
                    help="Comma-separated subset of: semgrep,bandit")
+    p.add_argument("--semgrep-config", default="p/python",
+                   help="Semgrep ruleset (e.g. p/python, p/default for JS/TS)")
     args = p.parse_args()
 
     all_truth, scored = E.load_ground_truth(args.ground_truth)
     print(f"target       : {args.target}")
     print(f"ground truth : {len(scored)} in-scope vulns")
 
-    runners = {"semgrep": run_semgrep, "bandit": run_bandit}
+    runners = {
+        "semgrep": lambda t: run_semgrep(t, args.semgrep_config),
+        "bandit": run_bandit,
+    }
     results = []
     for tool in [t.strip() for t in args.tools.split(",") if t.strip()]:
         if tool not in runners:

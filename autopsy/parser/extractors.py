@@ -209,13 +209,31 @@ def extract_js_imports(root: Node) -> list[ImportDef]:
     return imports
 
 
+def _unwrapped_children(node: Node) -> list[Node]:
+    """Direct children, with `export ...` statements unwrapped one level.
+
+    In ES modules / TypeScript, top-level declarations are usually exported, so
+    a `function`/`class`/`const` lives inside an `export_statement` rather than
+    directly under the module root. Without unwrapping, the module-level
+    extractors miss every exported declaration.
+    """
+    out: list[Node] = []
+    for c in node.children:
+        if c.type == "export_statement":
+            out.extend(c.children)
+        else:
+            out.append(c)
+    return out
+
+
 def _extract_js_functions_from_node(root: Node, prefix: str = "") -> list[FunctionDef]:
     """Extract function definitions from JS/TS node."""
     functions = []
+    kids = _unwrapped_children(root)
 
     # Regular function declarations
     for node_type in ("function_declaration", "method_definition"):
-        for node in _children_of_type(root, node_type):
+        for node in [c for c in kids if c.type == node_type]:
             name_node = node.child_by_field_name("name")
             name = _text(name_node) if name_node else "<anonymous>"
             qualified = f"{prefix}.{name}" if prefix else name
@@ -241,7 +259,7 @@ def _extract_js_functions_from_node(root: Node, prefix: str = "") -> list[Functi
             ))
 
     # Arrow functions assigned to variables: const foo = () => {}
-    for node in _children_of_type(root, "lexical_declaration"):
+    for node in [c for c in kids if c.type == "lexical_declaration"]:
         for declarator in _children_of_type(node, "variable_declarator"):
             name_node = declarator.child_by_field_name("name")
             value_node = declarator.child_by_field_name("value")
