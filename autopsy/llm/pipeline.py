@@ -230,6 +230,32 @@ def scan_stream(
     except Exception as e:  # pragma: no cover — defensive
         yield f"[note] Deletion analysis unavailable: {e}\n\n"
 
+    # ------------------------------------------------------------------
+    # Graph-derived static check — security gate whose return value is
+    # discarded (e.g. check_permission(...) called but its result ignored).
+    # The dependency graph records the cross-file call edge; the AST tells us
+    # the return is thrown away. We emit these as standard findings so the
+    # result is deterministic and does not depend on the model noticing the
+    # pattern. This is a cross-file capability the graph enables that a plain
+    # prompt reproduces unreliably.
+    # ------------------------------------------------------------------
+    deterministic_findings_md = ""
+    try:
+        from autopsy.detection.ignored_returns import (
+            detect_ignored_security_returns,
+            format_ignored_return_findings,
+        )
+
+        if root_dir is not None:
+            ignored = detect_ignored_security_returns(
+                root_dir, only_files=changed_files or None
+            )
+            if ignored:
+                deterministic_findings_md = format_ignored_return_findings(ignored)
+                yield deterministic_findings_md + "\n"
+    except Exception as e:  # pragma: no cover — defensive
+        yield f"[note] Ignored-return analysis skipped: {e}\n\n"
+
     # Phase 0: AI-generated code detection
     from autopsy.detection.heuristics import analyze_diff as detect_ai
 
@@ -360,7 +386,15 @@ def scan_stream(
     blast_injection = ""
     if blast_context:
         blast_injection = f"\n\n## Computed Blast Radius Data\n{blast_context}\n"
-    user_msg = f"{context}\n\n## Triage Notes\n{triage_raw}{blast_injection}\n\n## Task\nAnalyze the git diff for security vulnerabilities. Focus especially on code flagged as AI-generated — these are sections developers may have accepted without full understanding."
+    dedup_note = ""
+    if deterministic_findings_md:
+        dedup_note = (
+            "\n\n## Already-Reported High-Confidence Findings\n"
+            "A deterministic graph-based check has ALREADY reported the "
+            "following findings. Do NOT repeat them; focus on other "
+            "vulnerabilities:\n" + deterministic_findings_md
+        )
+    user_msg = f"{context}\n\n## Triage Notes\n{triage_raw}{blast_injection}{dedup_note}\n\n## Task\nAnalyze the git diff for security vulnerabilities. Focus especially on code flagged as AI-generated — these are sections developers may have accepted without full understanding."
     yield from stream_sonnet(SCAN_SYSTEM, user_msg)
 
 
