@@ -411,15 +411,26 @@ def build_graph_and_diff(demo_dir: Path, baseline_dir: Path, repo_dir: Path,
     return graph, diff_text, changed_files
 
 
-def run_scan(graph, diff_text, changed_files, repo_dir, temperature):
-    """Invoke scan_stream and return the concatenated streamed output + elapsed."""
-    _, _, scan_stream = _import_autopsy()
-    kwargs = {}
-    if temperature is not None:
-        kwargs["temperature"] = temperature
+def run_scan(graph, diff_text, changed_files, repo_dir, temperature,
+             chunked=False, window=400):
+    """Invoke the scan and return the concatenated streamed output + elapsed.
+
+    chunked=True uses the map-reduce scanner (windows every file so large files
+    aren't truncated); otherwise the single-shot scan_stream.
+    """
     t0 = time.time()
     chunks = []
-    for chunk in scan_stream(graph, diff_text, changed_files, root_dir=repo_dir, **kwargs):
+    if chunked:
+        from autopsy.llm.chunking import scan_stream_chunked
+        stream = scan_stream_chunked(graph, diff_text, changed_files,
+                                     root_dir=repo_dir, window_lines=window)
+    else:
+        _, _, scan_stream = _import_autopsy()
+        kwargs = {}
+        if temperature is not None:
+            kwargs["temperature"] = temperature
+        stream = scan_stream(graph, diff_text, changed_files, root_dir=repo_dir, **kwargs)
+    for chunk in stream:
         chunks.append(chunk)
         console.print(chunk, end="", highlight=False)
     return "".join(chunks), time.time() - t0
@@ -468,7 +479,7 @@ def run_raw_llm_scan(repo_dir, diff_text, changed_files, temperature):
 
 def run_single(
     demo_dir: Path, baseline_dir: Path, all_truth, scored, fuzz, temperature,
-    mode="safe", arm="autopsy", dedupe=True
+    mode="safe", arm="autopsy", dedupe=True, chunked=False, window=400
 ) -> dict:
     """Run one scan with the given arm ('autopsy' = full pipeline, 'raw' = no graph)."""
     scored_ids = {t["id"] for t in scored}
@@ -486,7 +497,8 @@ def run_single(
         if arm == "raw":
             output, elapsed = run_raw_llm_scan(repo_dir, diff_text, changed_files, temperature)
         else:
-            output, elapsed = run_scan(graph, diff_text, changed_files, repo_dir, temperature)
+            output, elapsed = run_scan(graph, diff_text, changed_files, repo_dir,
+                                       temperature, chunked=chunked, window=window)
 
     findings = parse_findings(output)
     if dedupe:
@@ -599,7 +611,8 @@ def run_eval(args):
             run = run_single(args.demo, args.baseline, all_truth, scored,
                              args.fuzz_lines, temperature,
                              mode=args.baseline_mode, arm=arm,
-                             dedupe=not args.no_dedupe)
+                             dedupe=not args.no_dedupe,
+                             chunked=args.chunked, window=args.window_lines)
             print_run_report(run, args.fuzz_lines)
             runs_by_arm[arm].append(run)
 
@@ -679,6 +692,8 @@ def summarize(runs, args, scored, all_truth, temp_note, arm="autopsy") -> dict:
             "baseline": str(args.baseline),
             "baseline_mode": args.baseline_mode,
             "dedupe": not args.no_dedupe,
+            "chunked": args.chunked,
+            "window_lines": args.window_lines,
             "fuzz_lines": args.fuzz_lines,
             "repeat": args.repeat,
             "include_provisional": args.include_provisional,
@@ -809,6 +824,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-dedupe", action="store_true",
                    help="Disable merging of duplicate findings at the same "
                         "location+category (dedupe is on by default)")
+    p.add_argument("--chunked", action="store_true",
+                   help="Use the map-reduce scanner (windows every file so large "
+                        "files are not truncated). Recommended for large repos.")
+    p.add_argument("--window-lines", type=int, default=400,
+                   help="Line-window size for --chunked scanning (default 400)")
     p.add_argument("--dry-run", action="store_true",
                    help="Offline: build graph + diff + matcher wiring, no LLM call")
     return p

@@ -56,14 +56,16 @@ git clone https://github.com/adeyosemanputra/pygoat.git /tmp/pygoat
 python benchmark/eval.py \
   --demo /tmp/pygoat/introduction \
   --ground-truth benchmark/pygoat/ground_truth_pygoat.json \
-  --baseline-mode whole-file --arm both --repeat 3
+  --baseline-mode whole-file --arm both --chunked --repeat 3
 ```
 
-> **Caveat — do this AFTER map-reduce.** `introduction/views.py` is ~1,240 lines
-> and the scan context truncates files past 500 lines, so most pygoat vulns
-> (lines 855–1026) would be cut off and a live run now would under-report due to
-> truncation, not capability. Build the chunked/map-reduce scanner first, then
-> this number is meaningful.
+> **Use `--chunked`.** `introduction/views.py` is ~1,240 lines and the
+> single-shot scan truncates files past 500 lines — which would drop 4 of the 8
+> vulns (lines 560, 878, 963, 1026) before the model ever sees them. The
+> map-reduce scanner (`--chunked`, `autopsy/llm/chunking.py`) windows every file
+> so all lines are scanned; verified token-free that all 8 vuln lines fall
+> inside scanned windows. Run the comparison with `--chunked` so the number
+> reflects capability, not truncation.
 
 ## Comparison baselines (other tools)
 
