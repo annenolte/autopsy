@@ -143,6 +143,8 @@ _CATEGORY_RULES = [
               "privilege", "authoriz")),
     ("crypto", ("crypto", "secret", "weak hash", "md5", "sha1",
                 "password storage", "weak cipher")),
+    ("xxe", ("xxe", "xml external", "external entit")),
+    ("ssti", ("ssti", "template injection", "server-side template")),
     ("ssrf", ("ssrf", "server-side request")),
     ("xss", ("xss", "cross-site script")),
     ("path", ("path traversal", "directory traversal")),
@@ -160,7 +162,7 @@ def category_tokens(raw: str) -> set[str]:
     return {token for token, needles in _CATEGORY_RULES if any(n in s for n in needles)}
 
 
-_INJECTION_FAMILY = {"sql", "command", "codeexec", "deserial"}
+_INJECTION_FAMILY = {"sql", "command", "codeexec", "deserial", "xxe", "ssti"}
 
 
 def categories_match(finding_category: str, accepted: list[str]) -> bool:
@@ -629,16 +631,32 @@ def run_eval(args):
         for arm in arms:
             if args.repeat > 1 or len(arms) > 1:
                 console.rule(f"[bold]Run {i + 1}/{args.repeat} — arm: {arm}[/bold]")
-            run = run_single(args.demo, args.baseline, all_truth, scored,
-                             args.fuzz_lines, temperature,
-                             mode=args.baseline_mode, arm=arm,
-                             dedupe=not args.no_dedupe,
-                             chunked=args.chunked, window=args.window_lines)
+            # A transient API/network error in one run should not discard the
+            # whole batch. Retry once, then skip just that run and continue so
+            # the remaining repeats still produce a confidence interval.
+            run = None
+            for attempt in (1, 2):
+                try:
+                    run = run_single(args.demo, args.baseline, all_truth, scored,
+                                     args.fuzz_lines, temperature,
+                                     mode=args.baseline_mode, arm=arm,
+                                     dedupe=not args.no_dedupe,
+                                     chunked=args.chunked, window=args.window_lines)
+                    break
+                except Exception as e:
+                    console.print(f"\n[red]Run {i + 1} ({arm}) attempt {attempt} "
+                                  f"failed: {e}[/red]")
+            if run is None:
+                console.print(f"[yellow]Skipping run {i + 1} ({arm}) after retry.[/yellow]")
+                continue
             print_run_report(run, args.fuzz_lines)
             runs_by_arm[arm].append(run)
 
     summaries = {}
     for arm in arms:
+        if not runs_by_arm[arm]:
+            console.print(f"[red]No successful runs for arm '{arm}'.[/red]")
+            continue
         summaries[arm] = summarize(runs_by_arm[arm], args, scored, all_truth,
                                    temp_note, arm=arm)
         write_results(summaries[arm], args, arm=arm)

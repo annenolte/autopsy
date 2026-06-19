@@ -80,6 +80,30 @@
       "line_start": 1018,
       "line_end": 1032,
       "description": "crypto_failure_lab: MD5 used to hash a user password (sink at line 1026)."
+    },
+    {
+      "id": "pygoat-xxe",
+      "file": "introduction/views.py",
+      "category": "XXE",
+      "line_start": 256,
+      "line_end": 270,
+      "description": "xxe_parse: SAX parser with feature_external_ges enabled (line 259) parses the raw user request body (line 260) -> XML External Entity injection."
+    },
+    {
+      "id": "pygoat-imagemath-eval",
+      "file": "introduction/views.py",
+      "category": "Code Injection",
+      "line_start": 574,
+      "line_end": 606,
+      "description": "a9_lab2: ImageMath.eval() evaluates a user-supplied 'function' expression (sink at line 588) -> arbitrary code execution."
+    },
+    {
+      "id": "pygoat-ssti",
+      "file": "introduction/views.py",
+      "category": "SSTI",
+      "line_start": 975,
+      "line_end": 1000,
+      "description": "ssti_lab: user-supplied blog content is written into a Django template file (line 996) that is later rendered by ssti_view_blog -> server-side template injection. Cross-function; the hardest of the set to detect statically."
     }
   ]
 }
