@@ -46,5 +46,14 @@ def test_bulk_boilerplate_scores_higher_than_human():
 def test_claude_coauthor_message_is_decisive():
     res = analyze_diff(HUMAN_DIFF, file_path="util.py",
                        commit_message="Add helper\n\nCo-Authored-By: Claude <noreply@anthropic.com>")
-    # the commit-message signal alone should push a small diff toward AI
+    # the commit-message signal fires...
     assert any(s.name == "commit_message" and s.score >= 0.9 for s in res.signals)
+    # ...and an explicit AI marker is now DECISIVE (the weighted average would
+    # otherwise dilute it below 0.5).
+    assert res.likely_ai is True
+
+
+def test_normal_human_commit_not_flagged():
+    res = analyze_diff(HUMAN_DIFF, file_path="util.py",
+                       commit_message="Fix off-by-one in counter")
+    assert res.likely_ai is False

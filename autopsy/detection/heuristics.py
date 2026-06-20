@@ -53,8 +53,21 @@ class AiDetectionResult:
 
     @property
     def likely_ai(self) -> bool:
-        """True if confidence exceeds threshold."""
-        return self.confidence >= 0.5
+        """True if confidence exceeds threshold, OR a definitive AI marker is
+        present.
+
+        Fix: the weighted-average confidence dilutes a single decisive signal —
+        e.g. a 'Co-Authored-By: Claude/Copilot/Cursor' trailer scores the
+        commit_message signal at 1.0, but averaged against ~zero content signals
+        it lands at ~0.15 and never crosses 0.5. An explicit AI-authorship marker
+        is ground truth, not a soft guess, so it should be decisive on its own.
+        """
+        if self.confidence >= 0.5:
+            return True
+        for s in self.signals:
+            if s.name == "commit_message" and s.score >= 0.95:
+                return True
+        return False
 
     @property
     def summary(self) -> str:

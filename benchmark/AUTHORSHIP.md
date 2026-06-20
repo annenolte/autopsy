@@ -63,18 +63,31 @@ Result (deterministic heuristic, no LLM):
 | **ROC-AUC** | **0.42** |
 | mean confidence | AI 0.25 vs human 0.28 |
 
-⚠️ **This is a negative result, reported honestly.** ROC-AUC 0.42 is **at/below
-random** — the heuristic **cannot distinguish AI-generated from human code** on
-this labeled set; AI code even scores marginally *lower*. The reviewer's concern
-(#8/#9) is confirmed.
+This number is for **unmarked** code (standalone files, no commit message). It
+splits into two honest cases:
 
-Caveat / why: SecurityEval samples are short single functions, and the
-heuristic's strongest signals (bulk addition, many complete functions,
-boilerplate density) require larger diffs to fire — so at snippet granularity it
-has almost nothing to work with. It may do better on whole-file / whole-commit
-AI code, but we have no labeled set of *large* AI-vs-human code to show that.
+**1. Explicitly-marked AI code → reliably detected (after a bug fix).**
+Investigating the failure surfaced a real aggregation bug: an explicit
+`Co-Authored-By: Claude/Copilot/Cursor` trailer scores the `commit_message`
+signal at 1.0, but the **weighted-average** confidence diluted that lone decisive
+signal to ~0.15, so even a dead-giveaway commit was scored *not* AI. Fixed: an
+explicit AI-authorship marker is now **decisive** (`AiDetectionResult.likely_ai`).
+Verified: a Co-Authored-By:Claude commit now flags `likely_ai=True`, and the
+human false-positive rate on 1,272 pre-2021 files is **unchanged (~2-3%)**
+(real human commits carry no such trailer, so the decisive path never fires on
+them).
 
-**Recommendation for the paper: descope the AI-authorship detector** — present it
-as an unvalidated heuristic / future work, and **report vulnerability detection
-entirely separately from authorship** (the two were conflated). Do not claim it
-works as a classifier; the evidence says it does not.
+**2. Unmarked AI code → still not detectable.** The content-only signals are
+near-random on the SecurityEval snippets (per-signal AUC 0.41–0.52; ROC-AUC 0.42
+overall). Two reasons: the files are ~12 lines (the size/bulk signals can't
+fire), and function-level AI vs human code genuinely looks alike to surface
+heuristics. Re-weighting/training cannot rescue features that each carry ~0
+information.
+
+**Honest framing for the paper:** the authorship component is best described as
+**(a) reliable detection of explicit AI-authorship markers** (commit trailers /
+"ai-generated" mentions) — high precision, low human FP — **plus (b) a soft
+prioritization score** from content signals that does **not** reliably classify
+*unmarked* AI code. Do **not** claim it is a general AI-code classifier (it
+isn't), and **report vulnerability detection separately from authorship**. The
+marker detection works; the unmarked-code classification is future work.
