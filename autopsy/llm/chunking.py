@@ -112,10 +112,12 @@ def scan_stream_chunked(
             yield f"[note] Static analysis skipped: {e}\n\n"
 
     # ── Map the LLM scan over line windows of every target file ──
-    targets = [f for f in (changed_files or []) if f.endswith(".py")]
+    _exts = (".py", ".js", ".ts", ".tsx", ".jsx")
+    targets = [f for f in (changed_files or []) if f.endswith(_exts)]
     if not targets and root_dir is not None:
         targets = [p.relative_to(root_dir).as_posix()
-                   for p in sorted(Path(root_dir).rglob("*.py"))]
+                   for p in sorted(Path(root_dir).rglob("*"))
+                   if p.suffix in _exts and p.is_file()]
 
     for rel in targets:
         if root_dir is None:

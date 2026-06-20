@@ -487,8 +487,9 @@ def run_raw_llm_scan(repo_dir, diff_text, changed_files, temperature):
     from autopsy.llm.prompts import SCAN_SYSTEM
 
     repo_dir = Path(repo_dir)
+    _exts = (".py", ".js", ".ts", ".tsx", ".jsx")
     parts = ["## Source Files\n"]
-    for p in sorted(repo_dir.rglob("*.py")):
+    for p in sorted(q for q in repo_dir.rglob("*") if q.suffix in _exts and q.is_file()):
         rel = p.relative_to(repo_dir)
         parts.append(f"### {rel}\n```\n{p.read_text(errors='replace')}\n```\n")
     parts.append(f"\n## Git Diff\n```diff\n{diff_text}\n```")
