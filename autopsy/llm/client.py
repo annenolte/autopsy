@@ -86,11 +86,17 @@ def call_haiku(
 def stream_sonnet(
     system: str,
     user_message: str,
-    max_tokens: int = 4096,
+    max_tokens: int = 8192,
 ):
     """Stream a response from Sonnet for deep reasoning.
 
     Yields text chunks as they arrive. This is the main output the user sees.
+
+    max_tokens raised 4096 -> 8192: a 4096 cap truncated the scan mid-finding on
+    larger inputs (observed a cut-off '## [SEVERITY: MEDIUM]' header), which can
+    drop real findings at the end of a long report and understate recall. Only
+    allows more output; never forces it (cost rises only when output was being
+    truncated).
     """
     client = get_client()
     try:
