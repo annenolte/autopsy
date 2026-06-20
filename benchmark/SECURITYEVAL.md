@@ -36,6 +36,24 @@ reports ≥1 finding in the file) is recall on a real third-party benchmark.
   ```
   (file-level CWE ground truth is derivable from the `CWE-*` folder names.)
 
+## Detection on AI-generated subsets (token-free)
+The same tools on SecurityEval's **model-generated** files (on-thesis: vulns in
+AI-generated code):
+
+| subset | Autopsy det. | Semgrep | Bandit |
+|--------|--------------|---------|--------|
+| Testcases_Copilot (130) | 1% | 15% | 28% |
+| Testcases_InCoder (130) | 2% | 13% | 28% |
+| Testcases_Insecure_Code (121, human) | 3% | 19% | 40% |
+
+Static tools detect *less* on AI-generated code (Bandit 28% vs 40% on human) —
+motivating better tooling. The Autopsy LLM number on these is staged (tokens).
+
+## CodeQL
+Not run: no `brew`/`gh` in this environment and the CodeQL CLI is a ~700MB
+download plus a per-target database build. Semgrep + Bandit serve as the SAST
+baselines; CodeQL commands are documented in `compare_tools.py`.
+
 ## Also used for #9
 SecurityEval's `Testcases_Copilot` + `Testcases_InCoder` (model-generated) vs
 `Testcases_Insecure_Code` (human-authored) provided the labeled AI-vs-human set

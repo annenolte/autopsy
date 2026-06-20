@@ -530,6 +530,11 @@ def run_single(
             f"Diff: {len(diff_text.splitlines())} lines, "
             f"{len(changed_files)} changed files"
         )
+        try:
+            from autopsy.llm.client import reset_usage, get_usage
+            reset_usage()
+        except Exception:
+            get_usage = None
         if arm == "raw":
             output, elapsed = run_raw_llm_scan(repo_dir, diff_text, changed_files, temperature)
         else:
@@ -537,6 +542,7 @@ def run_single(
             output, elapsed = run_scan(graph, diff_text, changed_files, repo_dir,
                                        temperature, chunked=chunked, window=window,
                                        use_triage=(arm != "sonnet-only"))
+        usage = get_usage() if get_usage else {}
 
     findings = parse_findings(output)
     if dedupe:
@@ -546,12 +552,15 @@ def run_single(
 
     loc = count_loc(demo_dir)
     n_scored = len(scored) or 1
+    total_tokens = sum(v for k, v in usage.items() if k.endswith(("_in", "_out")))
 
     return {
         "arm": arm,
         "metrics": metrics,
         "counts": {"tp": m["tp"], "fp": m["fp"], "fn": m["fn"],
                    "total_findings": len(findings)},
+        "usage": usage,
+        "tokens_per_kloc": round(total_tokens / (loc / 1000)) if loc else 0,
         "target_loc": loc,
         "scan_time_per_kloc": round(elapsed / (loc / 1000), 1) if loc else 0,
         "scan_time_per_vuln": round(elapsed / n_scored, 1),
@@ -589,6 +598,12 @@ def print_run_report(run: dict, fuzz: int):
     table.add_row("Target LOC", str(run.get("target_loc", 0)))
     table.add_row("Time / KLOC", f"{run.get('scan_time_per_kloc', 0)}s")
     table.add_row("Time / vuln", f"{run.get('scan_time_per_vuln', 0)}s")
+    u = run.get("usage") or {}
+    if u:
+        tin = u.get("haiku_in", 0) + u.get("sonnet_in", 0)
+        tout = u.get("haiku_out", 0) + u.get("sonnet_out", 0)
+        table.add_row("Tokens (in/out)", f"{tin}/{tout}")
+        table.add_row("Tokens / KLOC", str(run.get("tokens_per_kloc", 0)))
     table.add_row("Fuzz (+/- lines)", str(fuzz))
     console.print(table)
 
@@ -794,6 +809,8 @@ def summarize(runs, args, scored, all_truth, temp_note, arm="autopsy") -> dict:
             "target_loc": r.get("target_loc", 0),
             "scan_time_per_kloc": r.get("scan_time_per_kloc", 0),
             "scan_time_per_vuln": r.get("scan_time_per_vuln", 0),
+            "usage": r.get("usage", {}),
+            "tokens_per_kloc": r.get("tokens_per_kloc", 0),
             "findings": r["findings"],
             "raw_output": r["raw_output"],
         } for r in runs],

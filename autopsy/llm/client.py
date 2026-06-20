@@ -22,6 +22,30 @@ HAIKU_MODEL = "claude-haiku-4-5-20251001"
 SONNET_MODEL = "claude-sonnet-4-5-20250929"
 
 
+# ── Token-usage accounting (reviewer #14: cost normalization) ──────────────────
+# Captures input/output tokens per model so the eval harness can report
+# tokens/cost per KLOC. Additive — does not affect detection.
+_USAGE = {"haiku_in": 0, "haiku_out": 0, "sonnet_in": 0, "sonnet_out": 0, "calls": 0}
+
+
+def reset_usage() -> None:
+    for k in _USAGE:
+        _USAGE[k] = 0
+
+
+def get_usage() -> dict:
+    return dict(_USAGE)
+
+
+def _record(model: str, usage) -> None:
+    try:
+        _USAGE[f"{model}_in"] += getattr(usage, "input_tokens", 0) or 0
+        _USAGE[f"{model}_out"] += getattr(usage, "output_tokens", 0) or 0
+        _USAGE["calls"] += 1
+    except Exception:  # pragma: no cover — accounting must never break a scan
+        pass
+
+
 def get_client() -> Anthropic:
     """Get an Anthropic client, checking for API key."""
     api_key = os.environ.get("ANTHROPIC_API_KEY")
@@ -49,6 +73,7 @@ def call_haiku(
             system=system,
             messages=[{"role": "user", "content": user_message}],
         )
+        _record("haiku", getattr(response, "usage", None))
         return response.content[0].text
     except RateLimitError:
         raise RuntimeError("Rate limited by Anthropic API. Wait a moment and retry.")
@@ -77,6 +102,10 @@ def stream_sonnet(
         ) as stream:
             for text in stream.text_stream:
                 yield text
+            try:
+                _record("sonnet", stream.get_final_message().usage)
+            except Exception:  # pragma: no cover
+                pass
     except RateLimitError:
         yield "\n\n[ERROR] Rate limited by Anthropic API. Wait a moment and retry."
     except APIConnectionError:

@@ -17,9 +17,11 @@ Time per KLOC is essentially flat (~273–275 s/KLOC) from the 254-line demo to 
 ~8× larger pygoat app — a useful scaling data point: the chunked scanner keeps
 throughput roughly linear in code size rather than blowing up.
 
-## ⚠️ CAVEAT — cost (dollars) per KLOC is NOT reported
-The Anthropic client in this repo does not capture per-call token usage, so the
-harness cannot produce a dollar cost per KLOC / file / vuln. Only **time** is
-normalized. A real cost-per-KLOC needs token accounting added to
-`autopsy/llm/client.py` (future work). The ~$4–6 total figure from the paper
-should be presented as an aggregate, not a normalized rate.
+## Token accounting (added — enables cost/KLOC)
+`autopsy/llm/client.py` now records input/output tokens per model
+(`get_usage()` / `reset_usage()`), and the harness reports **tokens (in/out)**
+and **tokens/KLOC** per run (in the run report + results JSON). Dollar cost is
+then `tokens × the model's published per-token price` — left as `tokens` rather
+than a hardcoded dollar figure so it doesn't bake in a price that may change.
+(Token numbers populate on a live run; the deterministic/offline paths make no
+API calls so report zero.)
