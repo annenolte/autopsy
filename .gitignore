@@ -28,3 +28,8 @@ benchmark/results/
 docs/
 autopsy-release/
 autopsy-public/
+
+# Paper-internal (local only)
+REVIEWER_RESPONSE.md
+PAPER_HANDOFF.md
+TODO_TO_FINISH.md
