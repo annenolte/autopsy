@@ -50,6 +50,16 @@ python benchmark/compare_tools.py --target benchmark/js_demo \
 Semgrep (`p/default`): **4/8 strict, 6/8 location-only** (caught eval, exec, raw
 `conn.query`, MD5; missed the concatenation-based SQLi and the ignored auth gate).
 
-## LLM scan (needs API tokens — not run)
-The Autopsy LLM scan on this TS app would measure the full-pipeline number; it is
-left for an explicit token decision.
+## LLM scan result (whole-file, N=5)
+
+| arm | Precision | Recall | F1 |
+|-----|-----------|--------|----|
+| **Autopsy** (graph + LLM) | 100% | **95%** (8/8 in 4 of 5 runs) | 97% |
+| Raw Sonnet (no graph) | 100% | 75% (6/8) | 86% |
+
+~$0.75 (46K in / 41K out, Sonnet 4.5). Despite the partial TS dependency graph
+(anonymous handlers / call edges not captured), the full pipeline detects **95%**
+of the 8 planted vulns and beats raw single-prompt prompting (75%) — so the
+multi-language claim holds at the *detection* level even where the graph is weak.
+Run: `python benchmark/eval.py --demo benchmark/js_demo --ground-truth
+benchmark/js_demo/ground_truth_js.json --baseline-mode whole-file --arm both --repeat 5`
