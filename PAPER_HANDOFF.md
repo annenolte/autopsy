@@ -245,12 +245,17 @@ python benchmark/per_category.py --results <results.json> --ground-truth <gt.jso
 
 ## 9b. Additional experiments (#9, #2, #16) — added after the first handoff
 
-### #9 — AI-authorship heuristic validated as a classifier (NEGATIVE result)
+### #9 — AI-authorship heuristic validated; one real bug fixed; split result
 Labeled set from **SecurityEval**: 260 AI files (Copilot+InCoder) vs 121 human.
-Deterministic heuristic: **ROC-AUC 0.42 (≈/below random), recall 0% @0.5**, AI
-mean confidence 0.25 < human 0.28. **The heuristic does NOT distinguish AI from
-human code.** ⚠️ **Paper action: descope the authorship detector** (present as
-future work), and **report vulnerability detection separately from authorship**.
+- **Bug found + fixed:** an explicit `Co-Authored-By: Claude/Copilot/Cursor`
+  trailer scored the commit_message signal 1.0 but the weighted-AVERAGE diluted
+  it to ~0.15, so marked AI code was scored not-AI. Now explicit markers are
+  **decisive** (`likely_ai`); verified, and human false-positive rate unchanged
+  (~2%). So **marked AI code is now reliably flagged.**
+- **Unmarked AI code: still not separable** — content signals are near-random on
+  the snippets (ROC-AUC 0.42; per-signal AUC 0.41–0.52).
+⚠️ **Paper framing:** marker detection + soft prioritization, **not** a general
+classifier of unmarked AI code; report vuln-detection separately from authorship.
 (`benchmark/eval_authorship_classifier.py`, `AUTHORSHIP.md`.)
 
 ### #2 — Established benchmark: SecurityEval (121 CWE-labeled files)
