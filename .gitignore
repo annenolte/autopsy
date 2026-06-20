@@ -23,3 +23,8 @@ extension/out/
 # Eval harness output
 results*.json
 benchmark/results/
+
+# Local-only (kept on disk, excluded from the published repo)
+docs/
+autopsy-release/
+autopsy-public/
