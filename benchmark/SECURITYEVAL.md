@@ -16,6 +16,7 @@ reports ≥1 finding in the file) is recall on a real third-party benchmark.
 | Autopsy deterministic layer (no LLM) | 3% (4/121) |
 | Semgrep (`p/python`) | 19% (23/121) |
 | Bandit | 40% (49/121) |
+| CodeQL (`security-extended`) | 42% (51/121) |
 | **Autopsy (full LLM pipeline, chunked)** | **95% (115/121)** |
 
 Run: `python benchmark/eval_securityeval.py --autopsy-llm` — 121 files scanned
@@ -54,9 +55,12 @@ Static tools detect *less* on AI-generated code (Bandit 28% vs 40% on human) —
 motivating better tooling. (Autopsy's LLM on the human Insecure_Code set: 95%.)
 
 ## CodeQL
-Not run: no `brew`/`gh` in this environment and the CodeQL CLI is a ~700MB
-download plus a per-target database build. Semgrep + Bandit serve as the SAST
-baselines; CodeQL commands are documented in `compare_tools.py`.
+Run as a third SAST baseline (CodeQL CLI 2.25.6, `python-security-extended.qls`,
+`codeql/python-queries` 1.8.4), scored file-level exactly as Semgrep/Bandit:
+**42% (51/121)** — above Bandit (40%) and roughly double Semgrep (19%), but far
+below Autopsy's 95%. SecurityEval is the analysis shape CodeQL's whole-program
+dataflow is least suited to (each file is an isolated function with no realized
+taint source); reported as-is. See `results/codeql_baseline_report.md`.
 
 ## Also used for #9
 SecurityEval's `Testcases_Copilot` + `Testcases_InCoder` (model-generated) vs

@@ -50,6 +50,18 @@ python benchmark/compare_tools.py --target benchmark/js_demo \
 Semgrep (`p/default`): **4/8 strict, 6/8 location-only** (caught eval, exec, raw
 `conn.query`, MD5; missed the concatenation-based SQLi and the ignored auth gate).
 
+CodeQL (`javascript-security-extended`, CodeQL CLI 2.25.6) scored through the same
+frozen matcher (`benchmark/run_codeql_baseline.py`):
+
+| Tool | recall (strict) | recall (loc-only) | # findings |
+|------|----------------|-------------------|-----------|
+| Semgrep (`p/default`) | 50% (4/8) | 75% (6/8) | 5 |
+| CodeQL (`security-extended`) | 62% (5/8) | 100% (8/8) | 7 |
+
+CodeQL reaches all 8 vuln lines under loc-only; the two concat-SQLi handlers and
+the MD5 hash normalize to a category the strict gate rejects. See
+`results/codeql_baseline_report.md`.
+
 ## LLM scan result (whole-file, N=5)
 
 | arm | Precision | Recall | F1 |
